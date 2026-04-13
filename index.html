@@ -1,0 +1,858 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>SCAN — Advanced Port Scanner</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Share+Tech+Mono&family=Rajdhani:wght@400;600;700&display=swap" rel="stylesheet" />
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+  <style>
+    /* ── Reset & Variables ─────────────────────────────────── */
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --bg:          #080c10;
+      --bg2:         #0d1117;
+      --bg3:         #111820;
+      --border:      #1a2535;
+      --border-glow: #0ff3;
+      --cyan:        #00e5ff;
+      --cyan-dim:    #00b4cc;
+      --green:       #00ff88;
+      --yellow:      #ffd60a;
+      --orange:      #ff6b35;
+      --red:         #ff2d55;
+      --white:       #e8edf3;
+      --muted:       #556070;
+      --font-mono:   'Share Tech Mono', monospace;
+      --font-ui:     'Rajdhani', sans-serif;
+      --glow-cyan:   0 0 12px #00e5ff55, 0 0 30px #00e5ff22;
+      --glow-green:  0 0 12px #00ff8855;
+    }
+
+    html { scroll-behavior: smooth; }
+
+    body {
+      background: var(--bg);
+      color: var(--white);
+      font-family: var(--font-ui);
+      font-size: 15px;
+      line-height: 1.6;
+      min-height: 100vh;
+      overflow-x: hidden;
+    }
+
+    /* ── Scanlines overlay ─────────────────────────────────── */
+    body::before {
+      content: '';
+      position: fixed; inset: 0;
+      background: repeating-linear-gradient(
+        0deg,
+        transparent,
+        transparent 2px,
+        rgba(0,229,255,0.015) 2px,
+        rgba(0,229,255,0.015) 4px
+      );
+      pointer-events: none;
+      z-index: 9999;
+    }
+
+    /* ── Header ───────────────────────────────────────────── */
+    header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 18px 32px;
+      border-bottom: 1px solid var(--border);
+      background: linear-gradient(90deg, #080c10 0%, #0a1320 50%, #080c10 100%);
+      position: sticky; top: 0; z-index: 100;
+    }
+
+    .logo {
+      display: flex; align-items: center; gap: 14px;
+    }
+    .logo-icon {
+      width: 38px; height: 38px;
+      border: 2px solid var(--cyan);
+      border-radius: 4px;
+      display: flex; align-items: center; justify-content: center;
+      box-shadow: var(--glow-cyan);
+      animation: pulse-border 2.5s ease-in-out infinite;
+    }
+    @keyframes pulse-border {
+      0%, 100% { box-shadow: var(--glow-cyan); }
+      50%       { box-shadow: 0 0 20px #00e5ff88, 0 0 60px #00e5ff33; }
+    }
+    .logo-icon svg { fill: var(--cyan); }
+
+    .logo-text {
+      font-family: var(--font-mono);
+      font-size: 20px;
+      color: var(--cyan);
+      letter-spacing: 3px;
+    }
+    .logo-sub {
+      font-family: var(--font-mono);
+      font-size: 10px;
+      color: var(--muted);
+      letter-spacing: 2px;
+      margin-top: 2px;
+    }
+
+    .header-status {
+      display: flex; align-items: center; gap: 8px;
+      font-family: var(--font-mono);
+      font-size: 11px;
+      color: var(--muted);
+    }
+    .status-dot {
+      width: 8px; height: 8px;
+      border-radius: 50%;
+      background: var(--green);
+      box-shadow: var(--glow-green);
+      animation: blink 1.4s ease-in-out infinite;
+    }
+    @keyframes blink { 0%,100%{opacity:1} 50%{opacity:.3} }
+
+    /* ── Layout ───────────────────────────────────────────── */
+    main {
+      max-width: 1280px;
+      margin: 0 auto;
+      padding: 32px 24px 64px;
+    }
+
+    /* ── Card ─────────────────────────────────────────────── */
+    .card {
+      background: var(--bg2);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 28px 32px;
+      margin-bottom: 24px;
+      position: relative;
+      overflow: hidden;
+    }
+    .card::before {
+      content: '';
+      position: absolute;
+      top: 0; left: 0; right: 0;
+      height: 2px;
+      background: linear-gradient(90deg, transparent, var(--cyan), transparent);
+      opacity: 0.5;
+    }
+
+    .card-title {
+      font-family: var(--font-mono);
+      font-size: 11px;
+      letter-spacing: 3px;
+      color: var(--cyan);
+      text-transform: uppercase;
+      margin-bottom: 22px;
+    }
+
+    /* ── Form grid ────────────────────────────────────────── */
+    .form-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 18px;
+    }
+    .form-grid .full { grid-column: 1 / -1; }
+
+    .field { display: flex; flex-direction: column; gap: 8px; }
+
+    label {
+      font-family: var(--font-mono);
+      font-size: 11px;
+      letter-spacing: 2px;
+      color: var(--muted);
+      text-transform: uppercase;
+    }
+
+    input, select {
+      background: var(--bg3);
+      border: 1px solid var(--border);
+      border-radius: 4px;
+      padding: 11px 14px;
+      color: var(--white);
+      font-family: var(--font-mono);
+      font-size: 14px;
+      outline: none;
+      transition: border-color .2s, box-shadow .2s;
+    }
+    input:focus, select:focus {
+      border-color: var(--cyan-dim);
+      box-shadow: 0 0 0 2px #00e5ff22;
+    }
+    input::placeholder { color: var(--muted); }
+
+    select option { background: var(--bg3); }
+
+    /* ── Checkbox row ─────────────────────────────────────── */
+    .check-row {
+      display: flex; align-items: center; gap: 10px;
+      cursor: pointer;
+    }
+    .check-row input[type="checkbox"] {
+      width: 16px; height: 16px;
+      accent-color: var(--cyan);
+      cursor: pointer;
+      padding: 0;
+    }
+    .check-row span {
+      font-family: var(--font-mono);
+      font-size: 12px;
+      color: var(--muted);
+    }
+
+    /* ── Buttons ─────────────────────────────────────────── */
+    .btn {
+      font-family: var(--font-ui);
+      font-weight: 700;
+      font-size: 15px;
+      letter-spacing: 2px;
+      text-transform: uppercase;
+      border: none;
+      border-radius: 4px;
+      padding: 13px 32px;
+      cursor: pointer;
+      transition: all .2s;
+    }
+    .btn-primary {
+      background: var(--cyan);
+      color: #080c10;
+    }
+    .btn-primary:hover:not(:disabled) {
+      background: #33eeff;
+      box-shadow: var(--glow-cyan);
+      transform: translateY(-1px);
+    }
+    .btn-primary:disabled {
+      opacity: .5;
+      cursor: not-allowed;
+    }
+    .btn-sm {
+      font-size: 11px;
+      padding: 6px 14px;
+      letter-spacing: 1px;
+    }
+    .btn-ghost {
+      background: transparent;
+      border: 1px solid var(--border);
+      color: var(--muted);
+    }
+    .btn-ghost:hover {
+      border-color: var(--cyan-dim);
+      color: var(--cyan);
+    }
+
+    /* ── Progress bar ─────────────────────────────────────── */
+    #progress-wrap {
+      display: none;
+      margin-top: 20px;
+    }
+    .progress-label {
+      display: flex;
+      justify-content: space-between;
+      font-family: var(--font-mono);
+      font-size: 11px;
+      color: var(--muted);
+      margin-bottom: 8px;
+    }
+    .progress-track {
+      height: 4px;
+      background: var(--bg3);
+      border-radius: 2px;
+      overflow: hidden;
+    }
+    .progress-fill {
+      height: 100%;
+      background: linear-gradient(90deg, var(--cyan), var(--green));
+      border-radius: 2px;
+      width: 0%;
+      transition: width .4s ease;
+      animation: shimmer 1.5s linear infinite;
+      background-size: 200% 100%;
+    }
+    @keyframes shimmer {
+      0%   { background-position: 200% 0; }
+      100% { background-position: -200% 0; }
+    }
+
+    /* ── Stats strip ──────────────────────────────────────── */
+    .stats-strip {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 16px;
+      margin-bottom: 24px;
+    }
+    .stat-box {
+      background: var(--bg2);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 20px 22px;
+      text-align: center;
+      transition: border-color .2s;
+    }
+    .stat-box:hover { border-color: var(--border-glow); }
+    .stat-val {
+      font-family: var(--font-mono);
+      font-size: 32px;
+      font-weight: 400;
+      color: var(--cyan);
+      line-height: 1;
+      margin-bottom: 6px;
+    }
+    .stat-lbl {
+      font-family: var(--font-mono);
+      font-size: 10px;
+      letter-spacing: 2px;
+      color: var(--muted);
+      text-transform: uppercase;
+    }
+
+    /* ── Charts row ───────────────────────────────────────── */
+    .charts-row {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 24px;
+      margin-bottom: 24px;
+    }
+    .chart-wrap {
+      background: var(--bg2);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 24px;
+      position: relative;
+    }
+    .chart-wrap canvas { max-height: 240px; }
+
+    /* ── Results section ──────────────────────────────────── */
+    #results-section { display: none; }
+
+    .target-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 14px 20px;
+      background: var(--bg3);
+      border: 1px solid var(--border);
+      border-bottom: none;
+      border-radius: 8px 8px 0 0;
+      font-family: var(--font-mono);
+    }
+    .target-ip   { font-size: 15px; color: var(--cyan); }
+    .target-meta { font-size: 11px; color: var(--muted); }
+    .target-os   { font-size: 11px; color: var(--green); }
+
+    /* ── Table ────────────────────────────────────────────── */
+    .results-table-wrap {
+      overflow-x: auto;
+      border: 1px solid var(--border);
+      border-radius: 0 0 8px 8px;
+      margin-bottom: 24px;
+    }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      font-family: var(--font-mono);
+      font-size: 13px;
+    }
+    thead th {
+      background: var(--bg3);
+      color: var(--muted);
+      font-size: 10px;
+      letter-spacing: 2px;
+      text-transform: uppercase;
+      padding: 12px 16px;
+      text-align: left;
+      border-bottom: 1px solid var(--border);
+    }
+    tbody tr {
+      border-bottom: 1px solid var(--border);
+      transition: background .15s;
+    }
+    tbody tr:hover { background: rgba(0,229,255,0.04); }
+    tbody tr:last-child { border-bottom: none; }
+    tbody td { padding: 11px 16px; }
+
+    /* risk badges */
+    .badge {
+      display: inline-block;
+      padding: 2px 10px;
+      border-radius: 3px;
+      font-size: 10px;
+      letter-spacing: 1px;
+      font-weight: 700;
+      text-transform: uppercase;
+    }
+    .badge-CRITICAL { background: #ff2d5520; color: var(--red); border: 1px solid #ff2d5540; }
+    .badge-HIGH     { background: #ff6b3520; color: var(--orange); border: 1px solid #ff6b3540; }
+    .badge-MEDIUM   { background: #ffd60a20; color: var(--yellow); border: 1px solid #ffd60a40; }
+    .badge-LOW      { background: #00ff8820; color: var(--green); border: 1px solid #00ff8840; }
+    .badge-INFO     { background: #00e5ff15; color: var(--cyan); border: 1px solid #00e5ff30; }
+
+    /* ── Terminal log ─────────────────────────────────────── */
+    .terminal {
+      background: #050810;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 16px 20px;
+      font-family: var(--font-mono);
+      font-size: 12px;
+      max-height: 200px;
+      overflow-y: auto;
+      margin-top: 20px;
+    }
+    .terminal::-webkit-scrollbar { width: 4px; }
+    .terminal::-webkit-scrollbar-track { background: transparent; }
+    .terminal::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
+
+    .log-line { line-height: 1.8; }
+    .log-line.info    { color: var(--cyan); }
+    .log-line.success { color: var(--green); }
+    .log-line.warn    { color: var(--yellow); }
+    .log-line.error   { color: var(--red); }
+    .log-line.muted   { color: var(--muted); }
+
+    /* ── Hint tooltip ─────────────────────────────────────── */
+    .hint-cell {
+      max-width: 300px;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      color: var(--muted);
+      font-size: 11px;
+    }
+
+    /* ── Empty state ─────────────────────────────────────── */
+    .empty {
+      text-align: center;
+      padding: 48px 24px;
+      color: var(--muted);
+      font-family: var(--font-mono);
+      font-size: 13px;
+    }
+
+    /* ── Responsive ───────────────────────────────────────── */
+    @media (max-width: 820px) {
+      .form-grid      { grid-template-columns: 1fr; }
+      .stats-strip    { grid-template-columns: repeat(2, 1fr); }
+      .charts-row     { grid-template-columns: 1fr; }
+      header          { padding: 14px 16px; }
+      main            { padding: 20px 12px 48px; }
+      .card           { padding: 20px 16px; }
+    }
+
+    /* ── Animations ───────────────────────────────────────── */
+    @keyframes fadeIn {
+      from { opacity: 0; transform: translateY(12px); }
+      to   { opacity: 1; transform: translateY(0); }
+    }
+    .fade-in { animation: fadeIn .4s ease forwards; }
+  </style>
+</head>
+<body>
+
+<!-- ── Header ─────────────────────────────────────────────────── -->
+<header>
+  <div class="logo">
+    <div class="logo-icon">
+      <svg width="20" height="20" viewBox="0 0 24 24">
+        <path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5"/>
+      </svg>
+    </div>
+    <div>
+      <div class="logo-text">PORT-SCAN</div>
+      <div class="logo-sub">ADVANCED NETWORK RECON</div>
+    </div>
+  </div>
+  <div class="header-status">
+    <div class="status-dot"></div>
+    SYSTEM ONLINE
+  </div>
+</header>
+
+<!-- ── Main ───────────────────────────────────────────────────── -->
+<main>
+
+  <!-- Scan config card -->
+  <div class="card">
+    <div class="card-title">// SCAN CONFIGURATION</div>
+
+    <div class="form-grid">
+      <div class="field full">
+        <label>Target(s)</label>
+        <input id="inp-targets" type="text"
+          placeholder="192.168.1.1  or  192.168.1.1,scanme.nmap.org  or  example.com" />
+      </div>
+
+      <div class="field">
+        <label>Port Range</label>
+        <input id="inp-ports" type="text" value="1-1024"
+          placeholder="80  or  20-1000  or  1-65535" />
+      </div>
+
+      <div class="field">
+        <label>Scan Type</label>
+        <select id="inp-scan-type">
+          <option value="tcp">TCP Connect (no root)</option>
+          <option value="syn">SYN Stealth (root required)</option>
+        </select>
+      </div>
+
+      <div class="field" style="justify-content: flex-end; padding-bottom:4px;">
+        <label style="opacity:0">options</label>
+        <label class="check-row">
+          <input type="checkbox" id="inp-banner" checked />
+          <span>Enable banner grabbing</span>
+        </label>
+      </div>
+
+      <div class="field" style="justify-content:flex-end;">
+        <button id="btn-scan" class="btn btn-primary" onclick="startScan()">
+          ▶  LAUNCH SCAN
+        </button>
+      </div>
+    </div>
+
+    <div id="progress-wrap">
+      <div class="progress-label">
+        <span id="prog-status">Initialising...</span>
+        <span id="prog-time">—</span>
+      </div>
+      <div class="progress-track">
+        <div class="progress-fill" id="prog-fill"></div>
+      </div>
+      <div class="terminal" id="terminal-log">
+        <div class="log-line muted">&gt; Waiting for scan to start...</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Stats strip -->
+  <div class="stats-strip">
+    <div class="stat-box">
+      <div class="stat-val" id="stat-open">—</div>
+      <div class="stat-lbl">Open Ports</div>
+    </div>
+    <div class="stat-box">
+      <div class="stat-val" id="stat-targets">—</div>
+      <div class="stat-lbl">Targets</div>
+    </div>
+    <div class="stat-box">
+      <div class="stat-val" id="stat-critical">—</div>
+      <div class="stat-lbl">Critical</div>
+    </div>
+    <div class="stat-box">
+      <div class="stat-val" id="stat-time">—</div>
+      <div class="stat-lbl">Duration</div>
+    </div>
+  </div>
+
+  <!-- Charts -->
+  <div class="charts-row">
+    <div class="chart-wrap">
+      <div class="card-title">// RISK DISTRIBUTION</div>
+      <canvas id="chart-risk"></canvas>
+    </div>
+    <div class="chart-wrap">
+      <div class="card-title">// TOP OPEN PORTS</div>
+      <canvas id="chart-ports"></canvas>
+    </div>
+  </div>
+
+  <!-- Results -->
+  <div id="results-section">
+    <div class="card-title" style="margin-bottom:16px;">// SCAN RESULTS</div>
+    <div id="results-container"></div>
+  </div>
+
+</main>
+
+<script>
+/* ── State ───────────────────────────────────────────────────── */
+let jobId       = null;
+let pollTimer   = null;
+let startTs     = null;
+let timerTick   = null;
+let riskChart   = null;
+let portsChart  = null;
+
+/* ── Chart init ──────────────────────────────────────────────── */
+function initCharts() {
+  const baseOpts = {
+    responsive: true,
+    maintainAspectRatio: true,
+    plugins: { legend: { labels: { color: '#556070', font: { family: 'Share Tech Mono', size: 11 } } } },
+  };
+
+  riskChart = new Chart(document.getElementById('chart-risk'), {
+    type: 'doughnut',
+    data: {
+      labels: ['CRITICAL', 'HIGH', 'MEDIUM', 'LOW', 'INFO'],
+      datasets: [{
+        data: [0, 0, 0, 0, 0],
+        backgroundColor: ['#ff2d5544','#ff6b3544','#ffd60a44','#00ff8844','#00e5ff44'],
+        borderColor:     ['#ff2d55',  '#ff6b35',  '#ffd60a',  '#00ff88',  '#00e5ff'],
+        borderWidth: 2,
+      }],
+    },
+    options: {
+      ...baseOpts,
+      cutout: '70%',
+      plugins: {
+        ...baseOpts.plugins,
+        tooltip: { callbacks: { label: ctx => ` ${ctx.label}: ${ctx.parsed}` } },
+      },
+    },
+  });
+
+  portsChart = new Chart(document.getElementById('chart-ports'), {
+    type: 'bar',
+    data: {
+      labels: [],
+      datasets: [{
+        label: 'Open Ports',
+        data: [],
+        backgroundColor: '#00e5ff33',
+        borderColor: '#00e5ff',
+        borderWidth: 1,
+        borderRadius: 3,
+      }],
+    },
+    options: {
+      ...baseOpts,
+      scales: {
+        x: { ticks: { color: '#556070', font: { family: 'Share Tech Mono', size: 10 } }, grid: { color: '#1a2535' } },
+        y: { ticks: { color: '#556070', font: { family: 'Share Tech Mono', size: 10 }, stepSize: 1 }, grid: { color: '#1a2535' }, beginAtZero: true },
+      },
+      plugins: { ...baseOpts.plugins, legend: { display: false } },
+    },
+  });
+}
+
+/* ── Log helper ───────────────────────────────────────────────── */
+function log(msg, type = 'info') {
+  const el  = document.getElementById('terminal-log');
+  const div = document.createElement('div');
+  div.className = `log-line ${type}`;
+  div.textContent = `> ${msg}`;
+  el.appendChild(div);
+  el.scrollTop = el.scrollHeight;
+}
+
+/* ── Start scan ───────────────────────────────────────────────── */
+async function startScan() {
+  const targets   = document.getElementById('inp-targets').value.trim();
+  const ports     = document.getElementById('inp-ports').value.trim();
+  const scanType  = document.getElementById('inp-scan-type').value;
+  const banner    = document.getElementById('inp-banner').checked;
+
+  if (!targets) { alert('Please enter at least one target.'); return; }
+
+  // Reset UI
+  document.getElementById('btn-scan').disabled = true;
+  document.getElementById('results-section').style.display = 'none';
+  document.getElementById('results-container').innerHTML = '';
+  document.getElementById('progress-wrap').style.display = 'block';
+  document.getElementById('terminal-log').innerHTML = '';
+  document.getElementById('prog-fill').style.width = '5%';
+  document.getElementById('stat-open').textContent     = '—';
+  document.getElementById('stat-targets').textContent  = '—';
+  document.getElementById('stat-critical').textContent = '—';
+  document.getElementById('stat-time').textContent     = '—';
+
+  // Start elapsed timer
+  startTs = Date.now();
+  clearInterval(timerTick);
+  timerTick = setInterval(() => {
+    const s = ((Date.now() - startTs) / 1000).toFixed(1);
+    document.getElementById('prog-time').textContent = `${s}s elapsed`;
+  }, 200);
+
+  log(`Launching ${scanType.toUpperCase()} scan → ${targets}`, 'info');
+  log(`Port range: ${ports} | Banner grab: ${banner}`, 'muted');
+
+  try {
+    const res  = await fetch('/api/scan', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ targets, ports, scan_type: scanType, grab_banner: banner }),
+    });
+    const data = await res.json();
+
+    if (!res.ok) { throw new Error(data.error || 'Scan failed to start'); }
+
+    jobId = data.job_id;
+    log(`Job started — ID: ${jobId}`, 'success');
+    document.getElementById('prog-status').textContent = 'Resolving targets...';
+
+    // Fake progress animation while we poll
+    let fakeProgress = 5;
+    const fakeTimer = setInterval(() => {
+      if (fakeProgress < 85) {
+        fakeProgress += (Math.random() * 3);
+        document.getElementById('prog-fill').style.width = fakeProgress + '%';
+      }
+    }, 600);
+
+    pollTimer = setInterval(async () => {
+      await pollJob(jobId, fakeTimer);
+    }, 1500);
+
+  } catch (err) {
+    log(`ERROR: ${err.message}`, 'error');
+    document.getElementById('prog-status').textContent = 'Error';
+    clearInterval(timerTick);
+    document.getElementById('btn-scan').disabled = false;
+  }
+}
+
+/* ── Poll job ─────────────────────────────────────────────────── */
+async function pollJob(id, fakeTimer) {
+  try {
+    const res  = await fetch(`/api/status/${id}`);
+    const job  = await res.json();
+
+    document.getElementById('prog-status').textContent =
+      job.status === 'scanning'   ? 'Scanning ports...' :
+      job.status === 'resolving'  ? 'Resolving targets...' :
+      job.status === 'done'       ? 'Complete!' : job.status;
+
+    if (job.status === 'done') {
+      clearInterval(pollTimer);
+      clearInterval(fakeTimer);
+      clearInterval(timerTick);
+
+      document.getElementById('prog-fill').style.width = '100%';
+      const dur = job.duration != null ? `${job.duration}s` : '—';
+      document.getElementById('prog-time').textContent = dur;
+
+      log(`Scan complete in ${dur}`, 'success');
+      log(`Open ports found: ${job.total_open}`, job.total_open > 0 ? 'warn' : 'success');
+
+      renderResults(job);
+      document.getElementById('btn-scan').disabled = false;
+    }
+
+    if (job.status === 'error') {
+      clearInterval(pollTimer);
+      clearInterval(fakeTimer);
+      clearInterval(timerTick);
+      log(`Scan error: ${job.error}`, 'error');
+      document.getElementById('btn-scan').disabled = false;
+    }
+
+  } catch (err) {
+    log(`Poll error: ${err.message}`, 'error');
+  }
+}
+
+/* ── Render results ───────────────────────────────────────────── */
+function renderResults(job) {
+  const container = document.getElementById('results-container');
+  const section   = document.getElementById('results-section');
+  section.style.display = 'block';
+  container.innerHTML   = '';
+
+  let totalOpen   = 0;
+  let critCount   = 0;
+  const allPorts  = [];
+  const riskCount = { CRITICAL: 0, HIGH: 0, MEDIUM: 0, LOW: 0, INFO: 0 };
+
+  for (const [target, data] of Object.entries(job.results || {})) {
+    const ports = (data.open_ports || []);
+    totalOpen  += ports.length;
+
+    ports.forEach(p => {
+      allPorts.push(p.port);
+      const r = p.risk || 'INFO';
+      riskCount[r] = (riskCount[r] || 0) + 1;
+      if (r === 'CRITICAL') critCount++;
+    });
+
+    // Target block
+    const header = document.createElement('div');
+    header.className = 'target-header fade-in';
+    header.innerHTML = `
+      <span class="target-ip">⬡ ${target}</span>
+      <span class="target-meta">IP: ${data.ip || target}</span>
+      <span class="target-os">⬣ OS: ${data.os_guess || 'Unknown'}</span>
+      <span class="target-meta">${ports.length} open port(s)</span>
+    `;
+
+    const tableWrap = document.createElement('div');
+    tableWrap.className = 'results-table-wrap fade-in';
+
+    if (ports.length === 0) {
+      tableWrap.innerHTML = '<div class="empty">No open ports found in scanned range.</div>';
+    } else {
+      const rows = ports.map(p => `
+        <tr>
+          <td style="color:var(--white);font-weight:700">${p.port}</td>
+          <td style="color:var(--yellow)">${p.service || '—'}</td>
+          <td><span class="badge badge-${p.risk || 'INFO'}">${p.risk || 'INFO'}</span></td>
+          <td style="color:var(--muted);font-size:12px">${escHtml(p.banner || '—')}</td>
+          <td class="hint-cell" title="${escHtml(p.vuln_hint || '')}">${escHtml(p.vuln_hint || '—')}</td>
+        </tr>
+      `).join('');
+
+      tableWrap.innerHTML = `
+        <table>
+          <thead>
+            <tr>
+              <th>Port</th><th>Service</th><th>Risk</th>
+              <th>Banner / Header</th><th>Vulnerability Hint</th>
+            </tr>
+          </thead>
+          <tbody>${rows}</tbody>
+        </table>
+      `;
+    }
+
+    container.appendChild(header);
+    container.appendChild(tableWrap);
+  }
+
+  // Stats
+  document.getElementById('stat-open').textContent     = totalOpen;
+  document.getElementById('stat-targets').textContent  = Object.keys(job.results || {}).length;
+  document.getElementById('stat-critical').textContent = critCount;
+  document.getElementById('stat-time').textContent     = job.duration ? `${job.duration}s` : '—';
+
+  // Risk chart
+  riskChart.data.datasets[0].data = [
+    riskCount.CRITICAL, riskCount.HIGH, riskCount.MEDIUM,
+    riskCount.LOW,       riskCount.INFO,
+  ];
+  riskChart.update();
+
+  // Ports bar chart (top 12)
+  const portFreq = {};
+  allPorts.forEach(p => portFreq[p] = (portFreq[p] || 0) + 1);
+  const topPorts = Object.entries(portFreq)
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 12);
+
+  portsChart.data.labels   = topPorts.map(([p]) => p);
+  portsChart.data.datasets[0].data = topPorts.map(([, c]) => c);
+  portsChart.update();
+
+  section.scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
+
+/* ── Escape HTML ─────────────────────────────────────────────── */
+function escHtml(str) {
+  return String(str)
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+}
+
+/* ── Boot ────────────────────────────────────────────────────── */
+window.addEventListener('DOMContentLoaded', () => {
+  initCharts();
+});
+</script>
+</body>
+</html>

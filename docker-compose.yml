@@ -1,0 +1,27 @@
+# ── docker-compose.yml ────────────────────────────────────────────────────────
+#
+# Usage:
+#   docker-compose up --build          # start web dashboard
+#   docker-compose up --build -d       # start in background
+#   docker-compose down                # stop & remove containers
+# ─────────────────────────────────────────────────────────────────────────────
+
+version: "3.9"
+
+services:
+  port-scanner:
+    build: .
+    container_name: port-scanner
+    ports:
+      - "5000:5000"
+    volumes:
+      # Persist reports and logs outside the container
+      - ./reports:/app/reports
+      - ./logs:/app/logs
+    environment:
+      - FLASK_ENV=development
+      - PORT=5000
+    restart: unless-stopped
+    # SYN scan needs NET_RAW capability (optional)
+    # cap_add:
+    #   - NET_RAW

@@ -1,0 +1,22 @@
+# ── Advanced Port Scanner — Python dependencies ──────────────────────────────
+#
+# Install with:
+#   pip install -r requirements.txt
+#
+# For SYN scan support (optional, requires root/Administrator):
+#   pip install scapy
+# ─────────────────────────────────────────────────────────────────────────────
+
+# Core networking (stdlib — no install needed: socket, ipaddress, subprocess)
+
+# Progress bar
+tqdm>=4.66.0
+
+# Rich terminal output
+rich>=13.7.0
+
+# Web dashboard & REST API
+flask>=3.0.0
+
+# Optional: SYN stealth scan (requires root/Administrator)
+# scapy>=2.5.0
