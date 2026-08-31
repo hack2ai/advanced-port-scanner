@@ -1,6 +1,5 @@
 #!/usr/bin/env python3
 """Command-line interface for authorized network service discovery."""
-
 from __future__ import annotations
 
 import argparse
@@ -13,28 +12,35 @@ from rich.console import Console
 from rich.panel import Panel
 from rich.table import Table
 
+from scanner.profiles import get_profile, list_profiles
 from scanner.scanner import scan_target
 from scanner.utils import parse_port_range, resolve_target, save_csv, save_json, save_txt, setup_logging
 from scanner.vuln_hints import RISK_COLORS
 
-VERSION = "3.0.0"
+VERSION = "0.1.0"
 console = Console()
 
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        prog="portscanner",
-        description="Professional TCP service discovery for authorized security testing.",
+        prog="aps",
+        description="Professional network service discovery for authorized security testing.",
     )
     parser.add_argument("-V", "--version", action="version", version=f"%(prog)s {VERSION}")
-    parser.add_argument("-t", "--targets", required=True, help="Comma-separated IP addresses or hostnames")
-    parser.add_argument("-p", "--ports", default="1-1024", help="Port or inclusive range (default: 1-1024)")
-    parser.add_argument("--scan-type", choices=("tcp", "syn"), default="tcp", help="TCP connect or optional SYN lab mode")
-    parser.add_argument("--no-banner", action="store_true", help="Disable small service-banner probes")
-    parser.add_argument("--save-json", action="store_true", help="Write a JSON report")
-    parser.add_argument("--save-csv", action="store_true", help="Write a CSV report")
-    parser.add_argument("--save-txt", action="store_true", help="Write a text report")
-    parser.add_argument("--output-dir", default="reports", help="Report directory (default: reports)")
+    subparsers = parser.add_subparsers(dest="command")
+
+    scan = subparsers.add_parser("scan", help="Run an authorized network discovery scan")
+    scan.add_argument("targets", help="Comma-separated IP addresses or hostnames")
+    scan.add_argument("-p", "--ports", default=None, help="Port or inclusive range; overrides --profile")
+    scan.add_argument("--profile", choices=tuple(list_profiles_item["name"] for list_profiles_item in list_profiles()), default="standard", help="Reusable scan profile")
+    scan.add_argument("--scan-type", choices=("tcp", "syn"), default="tcp", help="TCP connect or optional SYN lab mode")
+    scan.add_argument("--no-banner", action="store_true", help="Disable small service-banner probes")
+    scan.add_argument("--save-json", action="store_true", help="Write a JSON report")
+    scan.add_argument("--save-csv", action="store_true", help="Write a CSV report")
+    scan.add_argument("--save-txt", action="store_true", help="Write a text report")
+    scan.add_argument("--output-dir", default="reports", help="Report directory (default: reports)")
+
+    subparsers.add_parser("profiles", help="List available scan profiles")
     return parser
 
 
@@ -54,11 +60,12 @@ def print_results(target: str, data: dict) -> None:
     console.print(table)
 
 
-def main() -> int:
-    args = build_parser().parse_args()
-    ports = parse_port_range(args.ports)
+def run_scan(args: argparse.Namespace) -> int:
+    profile = get_profile(args.profile)
+    ports_text = args.ports or (profile.port_range if profile else "1-1024")
+    ports = parse_port_range(ports_text)
     if not ports:
-        console.print(f"[bold red]Invalid port range:[/bold red] {args.ports}")
+        console.print(f"[bold red]Invalid port range:[/bold red] {ports_text}")
         return 2
 
     logger = setup_logging()
@@ -75,9 +82,10 @@ def main() -> int:
         return 2
 
     start_port, end_port = ports
+    profile_label = args.profile if args.ports is None else "custom"
     console.print(Panel.fit(
         f"[bold cyan]ADVANCED PORT SCANNER[/bold cyan]  v{VERSION}\n"
-        f"Targets: {len(resolved)}  •  Ports: {start_port}-{end_port}  •  Mode: {args.scan_type.upper()}\n"
+        f"Targets: {len(resolved)}  •  Profile: {profile_label}  •  Ports: {start_port}-{end_port}  •  Mode: {args.scan_type.upper()}\n"
         "[yellow]Authorized systems only.[/yellow]",
         border_style="cyan",
     ))
@@ -96,6 +104,7 @@ def main() -> int:
         "scan_time": datetime.now(timezone.utc).isoformat(),
         "duration": f"{duration}s",
         "scan_type": args.scan_type.upper(),
+        "profile": profile_label,
         "port_range": f"{start_port}-{end_port}",
         "total_open": total_open,
         "targets": target_data,
@@ -103,7 +112,7 @@ def main() -> int:
 
     saved: list[str] = []
     os.makedirs(args.output_dir, exist_ok=True)
-    stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    stamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
     if args.save_json:
         path = os.path.join(args.output_dir, f"scan_{stamp}.json"); save_json(results, path); saved.append(path)
     if args.save_csv:
@@ -116,6 +125,23 @@ def main() -> int:
         message += "\nReports: " + ", ".join(saved)
     console.print(Panel(message, border_style="green"))
     return 0
+
+
+def main() -> int:
+    args = build_parser().parse_args()
+    if args.command == "profiles":
+        table = Table(show_header=True, header_style="bold cyan")
+        table.add_column("Profile")
+        table.add_column("Ports")
+        table.add_column("Description")
+        for profile in list_profiles():
+            table.add_row(profile["name"], profile["ports"], str(profile["description"]))
+        console.print(table)
+        return 0
+    if args.command == "scan":
+        return run_scan(args)
+    console.print("[yellow]Choose a command. Try:[/yellow] aps scan --help")
+    return 2
 
 
 if __name__ == "__main__":
