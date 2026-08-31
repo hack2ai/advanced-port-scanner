@@ -19,6 +19,7 @@ from scanner.jobs import JobManager, ScanJob
 from scanner.profiles import get_profile, list_profiles
 from scanner.reporting import render_html_report
 from scanner.scanner import scan_target
+from scanner.security import RateLimiter, csrf_token, require_csrf, security_headers
 from scanner.utils import audit, parse_port_range, resolve_target, save_csv, save_json, save_txt, setup_logging
 
 app = Flask(__name__, template_folder="templates")
@@ -30,11 +31,23 @@ app.config["SESSION_COOKIE_SECURE"] = settings.secure_cookies
 logger = setup_logging(str(ROOT / "logs"))
 history = ScanHistory(settings.scan_db)
 job_manager = JobManager(max_workers=settings.max_concurrent_jobs, max_queue=16, retention=100)
+auth_limiter = RateLimiter(settings.auth_rate_limit, settings.auth_rate_window)
+scan_limiter = RateLimiter(settings.scan_rate_limit, settings.scan_rate_window)
 
 if settings.auth_enabled and (not settings.secret_key or not settings.auth_username or not settings.auth_password_hash):
     raise RuntimeError("AUTH_ENABLED requires SECRET_KEY, AUTH_USERNAME, and AUTH_PASSWORD_HASH")
 if settings.auth_role not in {"viewer", "operator", "admin"}:
     raise RuntimeError("AUTH_ROLE must be viewer, operator, or admin")
+
+
+@app.after_request
+def add_security_headers(response):
+    return security_headers(response)
+
+
+def _client_key(prefix: str) -> str:
+    address = request.headers.get("X-Forwarded-For", request.remote_addr or "unknown").split(",", 1)[0].strip()
+    return f"{prefix}:{address}"
 
 
 def _utc_now() -> str:
@@ -44,6 +57,7 @@ def _utc_now() -> str:
 def _require(action: str):
     def decorator(view):
         @wraps(view)
+        @require_csrf
         def wrapped(*args, **kwargs):
             if not settings.auth_enabled:
                 return view(*args, **kwargs)
@@ -56,14 +70,21 @@ def _require(action: str):
                 audit(logger, "permission_denied", username=username, action=action)
                 return jsonify({"error": "Permission denied"}), 403
             return view(*args, **kwargs)
-        return wrapped
+        return decorator_body_safe(wrapped)
     return decorator
+
+
+def decorator_body_safe(view):
+    return view
 
 
 @app.post("/api/auth/login")
 def login():
     if not settings.auth_enabled:
         return jsonify({"error": "Authentication is disabled"}), 400
+    if not auth_limiter.allow(_client_key("login")):
+        audit(logger, "auth.rate_limited")
+        return jsonify({"error": "Too many login attempts; try again later"}), 429
     body = request.get_json(silent=True)
     if not isinstance(body, dict):
         return jsonify({"error": "Request body must be JSON"}), 400
@@ -74,11 +95,13 @@ def login():
     session.clear()
     session["username"] = user.username
     session["role"] = user.role
+    token = csrf_token()
     audit(logger, "auth.login.success", username=user.username, role=user.role)
-    return jsonify({"username": user.username, "role": user.role})
+    return jsonify({"username": user.username, "role": user.role, "csrf_token": token})
 
 
 @app.post("/api/auth/logout")
+@require_csrf
 def logout():
     username = session.get("username")
     session.clear()
@@ -92,7 +115,8 @@ def me():
     if not settings.auth_enabled:
         return jsonify({"authenticated": False, "auth_enabled": False})
     username = session.get("username")
-    return jsonify({"authenticated": bool(username), "username": username, "role": session.get("role")})
+    token = csrf_token() if username else None
+    return jsonify({"authenticated": bool(username), "username": username, "role": session.get("role"), "csrf_token": token})
 
 
 def _validate_request(body: dict):
@@ -122,7 +146,7 @@ def _validate_request(body: dict):
         return None, None, None, None, None, f"Port range exceeds configured limit of {settings.max_ports} ports"
     targets = list(dict.fromkeys(t.strip() for t in targets_raw.split(",") if t.strip()))
     if len(targets) > settings.max_targets:
-        return None, None, None, None, None, f"Too many targets; maximum is {settings.max_targets}"
+        return None, None, None, None, None, f"Too many targets; maximum is {settings.max_targets} ports"
     return targets_raw, port_range, scan_type, grab_banner, profile_name or "custom", targets
 
 
@@ -144,6 +168,8 @@ def profiles():
 @app.post("/api/scan")
 @_require("scan")
 def start_scan():
+    if not scan_limiter.allow(_client_key("scan")):
+        return jsonify({"error": "Too many scan requests; try again later"}), 429
     body = request.get_json(silent=True)
     if not isinstance(body, dict):
         return jsonify({"error": "Request body must be JSON"}), 400
