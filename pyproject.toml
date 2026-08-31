@@ -1,0 +1,25 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "advanced-port-scanner"
+version = "0.1.0"
+description = "Professional defensive network discovery scanner"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+  "flask>=3.0,<4",
+  "gunicorn>=21,<24",
+  "scapy>=2.5,<3",
+  "tqdm>=4.66,<5",
+]
+
+[project.scripts]
+aps = "main:main"
+
+[tool.setuptools]
+packages = ["scanner", "web"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
