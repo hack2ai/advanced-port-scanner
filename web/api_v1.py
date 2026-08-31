@@ -148,27 +148,8 @@ def html_report(job_id: str):
 @api_v1.get("/analytics")
 @_require("view")
 def analytics():
+    from scanner.analytics import summarize_scans
+
     history = current_app.config["APS_HISTORY"]
-    items = history.list(200)
-    targets = set()
-    open_ports = 0
-    risk_counts = {"CRITICAL": 0, "HIGH": 0, "MEDIUM": 0, "LOW": 0, "INFO": 0}
-    services: dict[str, int] = {}
-    for item in items:
-        for target, result in (item.get("results") or {}).items():
-            targets.add(target)
-            for port in result.get("open_ports") or []:
-                open_ports += 1
-                risk = port.get("risk", "INFO")
-                risk_counts[risk] = risk_counts.get(risk, 0) + 1
-                service = str(port.get("service", "unknown"))
-                services[service] = services.get(service, 0) + 1
-    top_services = dict(sorted(services.items(), key=lambda pair: (-pair[1], pair[0]))[:10])
-    return data_response({
-        "scans": len(items),
-        "targets": len(targets),
-        "open_ports": open_ports,
-        "risk_distribution": risk_counts,
-        "top_services": top_services,
-        "generated_at": datetime.now(timezone.utc).isoformat(),
-    })
+    items = history.list(200, include_results=True)
+    return data_response(summarize_scans(items))
