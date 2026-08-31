@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import sys
+import time
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -75,11 +76,13 @@ def start_scan():
         for target in targets:
             if job.cancel_event.is_set():
                 job.status = "cancelled"
+                job.finished_at = _utc_now()
+                history.save(job.snapshot(include_results=True))
                 return
             job.current_target = target
             ip = resolve_target(target, logger)
             if not ip:
-                job.results[target] = {
+                result = {
                     "ip": None,
                     "open_ports": [],
                     "os_guess": "Unknown",
@@ -87,15 +90,17 @@ def start_scan():
                     "error": "Target could not be resolved",
                 }
                 completed_offset += end_port - start_port + 1
-                job_manager.update_progress(job, completed=completed_offset, current_target=target, result_target=target, result=job.results[target])
+                job_manager.update_progress(
+                    job,
+                    completed=completed_offset,
+                    current_target=target,
+                    result_target=target,
+                    result=result,
+                )
                 continue
 
             def progress(done: int, total: int) -> None:
-                job_manager.update_progress(
-                    job,
-                    completed=completed_offset + done,
-                    current_target=target,
-                )
+                job_manager.update_progress(job, completed=completed_offset + done, current_target=target)
 
             try:
                 result = scan_target(
@@ -110,6 +115,9 @@ def start_scan():
                 )
             except InterruptedError:
                 job.status = "cancelled"
+                job.finished_at = _utc_now()
+                history.save(job.snapshot(include_results=True))
+                audit(logger, "scan_cancelled", job_id=job.job_id)
                 return
 
             completed_offset += end_port - start_port + 1
@@ -121,11 +129,10 @@ def start_scan():
                 result_target=target,
                 result=result,
             )
-            job.total_open += len(result.get("open_ports", []))
+            job.current_target = target
 
         elapsed = 0.0
         if job.started_monotonic is not None:
-            import time
             elapsed = round(max(0.0, time.monotonic() - job.started_monotonic), 2)
         payload = {
             "schema_version": "1.0",
@@ -136,7 +143,9 @@ def start_scan():
             "total_open": job.total_open,
             "targets": job.results,
         }
-        history.save(job.snapshot(include_results=True))
+        job.status = "completed"
+        job.finished_at = _utc_now()
+        history.save(job.snapshot(include_results=True) | {"duration": elapsed})
         report_dir = ROOT / settings.reports_dir
         report_dir.mkdir(exist_ok=True)
         timestamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
@@ -145,13 +154,7 @@ def start_scan():
         save_txt(payload, str(report_dir / f"scan_{timestamp}_{job.job_id}.txt"))
 
     try:
-        job = job_manager.submit(
-            targets_raw,
-            f"{start_port}-{end_port}",
-            scan_type,
-            total_work,
-            runner,
-        )
+        job = job_manager.submit(targets_raw, f"{start_port}-{end_port}", scan_type, total_work, runner)
     except RuntimeError as exc:
         return jsonify({"error": str(exc)}), 429
 
