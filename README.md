@@ -1,223 +1,170 @@
-# Advanced Network Port Scanner
+# Advanced Port Scanner
 
-> A Python network-security project combining multithreaded TCP scanning, optional SYN probing, service/banner detection, risk hints, report generation, and a Flask-based monitoring dashboard.
+A professional Python tool for **authorized network asset discovery**. It provides a focused CLI, a Flask dashboard/API, concurrent TCP discovery, optional lab-only SYN probing, lightweight service banners, informational risk hints, and JSON/CSV/TXT reporting.
 
-[![Python](https://img.shields.io/badge/Python-3.x-3776AB?style=for-the-badge&logo=python&logoColor=white)](https://www.python.org/)
-[![Flask](https://img.shields.io/badge/Flask-Web%20Dashboard-000000?style=for-the-badge&logo=flask&logoColor=white)](https://flask.palletsprojects.com/)
-[![Docker](https://img.shields.io/badge/Docker-Containerized-2496ED?style=for-the-badge&logo=docker&logoColor=white)](https://www.docker.com/)
+> **Authorized use only.** Scan systems you own or have explicit permission to assess.
 
-## Overview
+## What changed in v3
 
-**Advanced Network Port Scanner** is a defensive security and network-engineering project for authorized asset discovery and service visibility.
-
-The application provides both a command-line interface and a Flask web dashboard. The scanning engine supports concurrent TCP checks, optional SYN probing, banner collection, basic OS fingerprinting, risk classification, and exportable scan reports.
-
-> **Authorized use only:** scan only systems you own or have explicit permission to test. This project is intended for controlled labs, defensive administration, and authorized security assessments.
+- Fixed the repository/package layout so CLI, web app, Docker, and imports use the same structure.
+- Added input validation and configurable resource limits for web jobs.
+- Reduced scanner concurrency to a safer default and added IPv4/IPv6 connection handling.
+- Added UTC timestamps and a versioned report schema.
+- Added a health endpoint and production Gunicorn container startup.
+- Added non-root container execution, `no-new-privileges`, and dropped Linux capabilities by default.
+- Added automated pytest coverage and GitHub Actions CI.
+- Rebuilt the dashboard around a responsive, lightweight interface.
+- Clarified that risk metadata is informational and is not proof of a vulnerability.
 
 ## Architecture
 
 ```text
-                 Target / Lab Network
-                         │
-                         ▼
-                Scanner Configuration
-                         │
-              ┌──────────┴──────────┐
-              │                     │
-        TCP Connect             SYN Probe
-              │                     │
-              └──────────┬──────────┘
-                         ▼
-                Concurrent Scan Engine
-                         │
-              ┌──────────┼──────────┐
-              ▼          ▼          ▼
-           Banner      Risk       OS / TTL
-          Detection   Hints       Analysis
-              │          │          │
-              └──────────┼──────────┘
-                         ▼
-                  Results / Reports
-                    │           │
-                    ▼           ▼
-                  CLI      Flask Dashboard
+CLI / Web UI
+     │
+     ▼
+Input validation ──► target resolution
+     │
+     ▼
+Concurrent scan engine
+     ├── TCP Connect
+     ├── optional SYN (controlled lab)
+     └── lightweight banner probe
+     │
+     ├── service metadata
+     ├── informational risk hints
+     └── heuristic TTL/OS indication
+     │
+     ▼
+Structured results ──► JSON / CSV / TXT
 ```
 
-## Key Capabilities
-
-- Multithreaded TCP port discovery
-- Optional SYN probing through Scapy
-- Service/banner detection
-- Basic TTL-based OS indication
-- Port/service risk hints
-- JSON, CSV and TXT report export
-- Flask dashboard with scan-job status
-- REST API for starting and monitoring jobs
-- Docker support
-- Timestamped logs and reports
-- Configurable target and port ranges
-
-## Technology Stack
-
-| Area | Technology |
-|---|---|
-| Language | Python |
-| CLI | argparse + Rich |
-| Scanner | Python sockets + optional Scapy |
-| Web | Flask |
-| Frontend charts | Chart.js |
-| API | Flask REST endpoints |
-| Containerization | Docker / Docker Compose |
-| Reports | JSON • CSV • TXT |
-
-## Project Structure
+## Project structure
 
 ```text
 advanced-port-scanner/
 ├── scanner/
-│   ├── scanner.py          # Scanning engine
-│   ├── utils.py            # Logging, resolution and reporting helpers
-│   └── vuln_hints.py       # Service/risk classification
+│   ├── __init__.py
+│   ├── scanner.py
+│   ├── utils.py
+│   └── vuln_hints.py
 ├── web/
-│   ├── app.py              # Flask dashboard + API
+│   ├── app.py
 │   └── templates/
 │       └── index.html
-├── reports/                # Generated scan reports
-├── logs/                   # Scan logs
-├── main.py                 # CLI entry point
+├── tests/
+│   ├── test_scanner.py
+│   ├── test_utils.py
+│   └── test_web.py
+├── .github/workflows/ci.yml
+├── main.py
 ├── requirements.txt
 ├── Dockerfile
 ├── docker-compose.yml
 └── README.md
 ```
 
-## Getting Started
+## Quick start
 
-### Prerequisites
-
-- Python 3.x
-- `pip`
-- Docker (optional)
-- Scapy (optional, for SYN probing)
-
-### Install
+### Local
 
 ```bash
 git clone https://github.com/hack2ai/advanced-port-scanner.git
 cd advanced-port-scanner
-python -m venv venv
+python -m venv .venv
 ```
 
-Activate the virtual environment, then install dependencies:
+Activate `.venv`, then:
 
 ```bash
-pip install -r requirements.txt
-```
-
-## Usage
-
-Use the scanner only against an authorized lab or system.
-
-### CLI
-
-```bash
+python -m pip install -r requirements.txt
 python main.py --help
 ```
 
-The CLI supports configurable targets, port ranges, scan mode, banner collection, and report output.
+Example against an authorized local/lab target:
 
-For safe experimentation, use a local VM/lab environment or another target for which you have explicit authorization.
+```bash
+python main.py -t 127.0.0.1 -p 1-1024 --save-json --save-csv --save-txt
+```
 
-### Web Dashboard
-
-Start the Flask application:
+### Dashboard
 
 ```bash
 python web/app.py
 ```
 
-The dashboard exposes scan configuration, job progress, result tables, risk distribution, and top-port visualizations.
+Open `http://127.0.0.1:5000`.
 
-### REST API
+Useful endpoints:
 
 | Method | Endpoint | Purpose |
 |---|---|---|
-| `POST` | `/api/scan` | Create an authorized scan job |
-| `GET` | `/api/status/<id>` | Retrieve job status/results |
-| `GET` | `/api/jobs` | List recent jobs |
+| GET | `/api/health` | Health check |
+| POST | `/api/scan` | Queue an authorized scan |
+| GET | `/api/status/<job_id>` | Poll a scan |
+| GET | `/api/jobs` | List recent jobs |
 
-## Scanning Modes
-
-| Mode | Description | Typical Requirement |
-|---|---|---|
-| TCP Connect | Uses normal TCP connection attempts | Standard user privileges |
-| SYN | Sends raw SYN probes through Scapy | Elevated privileges may be required |
-
-The SYN mode is provided for controlled security-testing environments and should not be used against systems without authorization.
-
-## Reporting
-
-Scan results can be exported for later analysis:
-
-```text
-reports/
-├── scan_<timestamp>.json
-├── scan_<timestamp>.csv
-└── scan_<timestamp>.txt
-```
-
-## Docker
-
-The repository includes Docker configuration for reproducible local execution. Review container privileges before enabling raw-packet scanning in a production environment.
+### Docker
 
 ```bash
 docker compose up --build
 ```
 
-## Security & Responsible Use
+The container runs the dashboard through Gunicorn as a non-root user. Reports and logs are persisted in local `reports/` and `logs/` directories.
 
-This project is intended for:
+SYN mode is **not** enabled by default in the container. If you deliberately need raw packets in an isolated lab, review and explicitly enable the `NET_RAW` capability in `docker-compose.yml`.
 
-- Personal cybersecurity labs
-- Authorized penetration-testing exercises
-- Defensive asset inventory
-- Network administration and troubleshooting
-- Security education
+## Scanner options
 
-Do not scan third-party infrastructure without explicit authorization.
+```text
+-t, --targets       Comma-separated IPs/hostnames
+-p, --ports         Single port or inclusive range
+--scan-type         tcp or syn
+--no-banner         Disable lightweight banner collection
+--save-json         Export JSON
+--save-csv          Export CSV
+--save-txt          Export TXT
+--output-dir        Report destination
+-V, --version       Show scanner version
+```
 
-For a production-grade security platform, additional controls would be appropriate, including authentication, authorization, rate limiting, audit logging, tenant isolation, job quotas, secret management, and stronger service/CVE verification.
+The web service applies configurable limits:
 
-## Limitations
+- `MAX_CONCURRENT_JOBS` — default `2`
+- `MAX_TARGETS` — default `16`
+- `MAX_PORTS` — default `4096`
 
-- Port availability does not prove a service is vulnerable.
-- Banner data can be incomplete or misleading.
-- TTL-based OS identification is heuristic rather than definitive.
-- Risk hints are informational and should be validated against authoritative vulnerability intelligence.
-- Network filtering, NAT, firewalls, IDS/IPS controls, and rate limits can affect results.
+## Reports
+
+JSON reports include a `schema_version` and `scanner_version` so downstream tooling can evolve safely. CSV contains one row per discovered open port; TXT is intended for quick human review.
+
+## Testing
+
+Run the local test suite:
+
+```bash
+python -m pytest -q
+```
+
+GitHub Actions runs the suite on supported Python 3.11–3.13 environments.
+
+## Security notes
+
+- Open ports indicate reachability, not vulnerability.
+- Risk hints are static defensive guidance and should be validated against authoritative vulnerability intelligence.
+- Banner collection is intentionally small and non-invasive.
+- TTL-based OS identification is heuristic and can be affected by routing and network devices.
+- The web API is designed for local/controlled deployment. Put it behind authentication, TLS, and network access controls before exposing it to untrusted users.
+- Do not add stealth, credential attacks, exploitation, or evasion features to this project.
 
 ## Roadmap
 
-- [ ] Automated pytest coverage
-- [ ] CI quality checks
 - [ ] Persistent scan history
-- [ ] Authenticated dashboard
-- [ ] NVD/CVE enrichment
-- [ ] UDP discovery research in an isolated lab environment
+- [ ] Authentication and role-based authorization for the dashboard
+- [ ] Structured audit events
 - [ ] Improved service identification
-- [ ] Structured audit logging
-- [ ] Semantic versioning and changelog
-
-## Project Value
-
-This project demonstrates practical **Python security engineering, concurrent networking, REST API development, web visualization, Dockerization, reporting, and defensive network reconnaissance concepts**.
-
-## Author
-
-**Pankaj (Tony) Kumar**  
-AI Engineer • Full Stack Developer • Generative AI & RAG Specialist
-
-[GitHub](https://github.com/hack2ai) • [LinkedIn](https://www.linkedin.com/in/pankaj-kumar-ab591a216)
+- [ ] Optional authoritative CVE enrichment
+- [ ] Export filtering and report templates
+- [ ] Packaging as an installable CLI (`pipx` friendly)
 
 ## License
 
