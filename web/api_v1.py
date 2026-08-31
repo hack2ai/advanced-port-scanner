@@ -46,7 +46,11 @@ def _require(action: str):
                 or (role == "viewer" and action == "view")
             )
             if not allowed:
-                return error_response("AUTH_REQUIRED" if not username else "FORBIDDEN", "Authentication required" if not username else "Permission denied", 401 if not username else 403)
+                return error_response(
+                    "AUTH_REQUIRED" if not username else "FORBIDDEN",
+                    "Authentication required" if not username else "Permission denied",
+                    401 if not username else 403,
+                )
             return view(*args, **kwargs)
         return wrapped
     return decorator
@@ -73,27 +77,21 @@ def profiles():
 @api_v1.post("/scans")
 @_require("scan")
 def create_scan():
-    """Delegate scan creation to the legacy route implementation."""
-    app = current_app
-    with app.test_request_context(request.path, method=request.method, json=request.get_json(silent=True), headers=dict(request.headers)):
-        result = app.view_functions["start_scan"]()
+    result = current_app.view_functions["start_scan"]()
     if isinstance(result, tuple):
         body, status = result
-        payload = body.get_json() if hasattr(body, "get_json") else {"error": "Request failed"}
+        payload = body.get_json() if hasattr(body, "get_json") else {}
         return error_response("SCAN_REQUEST_FAILED", payload.get("error", "Request failed"), status)
-    payload = result.get_json()
-    return data_response(payload, result.status_code)
+    return data_response(result.get_json(), result.status_code)
 
 
 @api_v1.get("/scans/<job_id>")
 @_require("view")
 def get_scan(job_id: str):
-    app = current_app
-    with app.test_request_context(f"/api/status/{job_id}", method="GET"):
-        result = app.view_functions["status"](job_id)
+    result = current_app.view_functions["status"](job_id)
     if isinstance(result, tuple):
         body, status = result
-        payload = body.get_json()
+        payload = body.get_json() if hasattr(body, "get_json") else {}
         return error_response("SCAN_NOT_FOUND", payload.get("error", "Job not found"), status)
     return data_response(result.get_json(), result.status_code)
 
@@ -101,14 +99,10 @@ def get_scan(job_id: str):
 @api_v1.post("/scans/<job_id>/cancel")
 @_require("cancel")
 def cancel_scan(job_id: str):
-    app = current_app
-    with app.test_request_context(f"/api/status/{job_id}/cancel", method="POST", json={}):
-        if session:
-            pass
-        result = app.view_functions["cancel"](job_id)
+    result = current_app.view_functions["cancel"](job_id)
     if isinstance(result, tuple):
         body, status = result
-        payload = body.get_json()
+        payload = body.get_json() if hasattr(body, "get_json") else {}
         return error_response("SCAN_CANCEL_FAILED", payload.get("error", "Unable to cancel scan"), status)
     return data_response(result.get_json(), result.status_code)
 
@@ -116,27 +110,24 @@ def cancel_scan(job_id: str):
 @api_v1.get("/jobs")
 @_require("view")
 def list_jobs():
-    app = current_app
-    result = app.view_functions["list_jobs"]()
+    result = current_app.view_functions["list_jobs"]()
     return data_response(result.get_json(), result.status_code)
 
 
 @api_v1.get("/history")
 @_require("view")
 def list_history():
-    app = current_app
-    result = app.view_functions["list_history"]()
+    result = current_app.view_functions["list_history"]()
     return data_response(result.get_json(), result.status_code)
 
 
 @api_v1.get("/history/<job_id>")
 @_require("view")
 def history_detail(job_id: str):
-    app = current_app
-    result = app.view_functions["history_detail"](job_id)
+    result = current_app.view_functions["history_detail"](job_id)
     if isinstance(result, tuple):
         body, status = result
-        payload = body.get_json()
+        payload = body.get_json() if hasattr(body, "get_json") else {}
         return error_response("HISTORY_NOT_FOUND", payload.get("error", "History entry not found"), status)
     return data_response(result.get_json(), result.status_code)
 
@@ -144,12 +135,13 @@ def history_detail(job_id: str):
 @api_v1.get("/reports/<job_id>/html")
 @_require("view")
 def html_report(job_id: str):
-    app = current_app
-    result = app.view_functions["html_report"](job_id)
+    result = current_app.view_functions["html_report"](job_id)
     if isinstance(result, tuple):
         body, status = result
-        payload = body.get_json()
+        payload = body.get_json() if hasattr(body, "get_json") else {}
         return error_response("REPORT_NOT_FOUND", payload.get("error", "Report not found"), status)
+    if isinstance(result, Response):
+        result.headers["X-Request-ID"] = request_id()
     return result
 
 
@@ -158,7 +150,6 @@ def html_report(job_id: str):
 def analytics():
     history = current_app.config["APS_HISTORY"]
     items = history.list(200)
-    total_scans = len(items)
     targets = set()
     open_ports = 0
     risk_counts = {"CRITICAL": 0, "HIGH": 0, "MEDIUM": 0, "LOW": 0, "INFO": 0}
@@ -174,7 +165,7 @@ def analytics():
                 services[service] = services.get(service, 0) + 1
     top_services = dict(sorted(services.items(), key=lambda pair: (-pair[1], pair[0]))[:10])
     return data_response({
-        "scans": total_scans,
+        "scans": len(items),
         "targets": len(targets),
         "open_ports": open_ports,
         "risk_distribution": risk_counts,
