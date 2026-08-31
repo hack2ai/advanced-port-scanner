@@ -10,7 +10,8 @@ from typing import Callable, Optional
 from tqdm import tqdm
 
 from .config import settings
-from .utils import detect_os, get_ttl, audit
+from .service_detection import identify_from_banner
+from .utils import audit, detect_os, get_ttl
 from .vuln_hints import VULNERABILITY_HINTS
 
 COMMON_SERVICES: dict[int, str] = {21:"FTP",22:"SSH",23:"Telnet",25:"SMTP",53:"DNS",69:"TFTP",80:"HTTP",110:"POP3",111:"RPCbind",135:"MS-RPC",139:"NetBIOS",143:"IMAP",161:"SNMP",389:"LDAP",443:"HTTPS",445:"SMB",993:"IMAPS",995:"POP3S",1433:"MSSQL",1521:"Oracle DB",2049:"NFS",2181:"ZooKeeper",3306:"MySQL",3389:"RDP",5432:"PostgreSQL",5900:"VNC",5984:"CouchDB",6379:"Redis",7001:"WebLogic",8080:"HTTP-Alt",8443:"HTTPS-Alt",8888:"Jupyter/HTTP",9200:"Elasticsearch",9300:"ES-Transport",11211:"Memcached",27017:"MongoDB",28017:"MongoDB-Web"}
@@ -130,10 +131,16 @@ def scan_target(
                     if not is_open:
                         continue
                     hints = VULNERABILITY_HINTS.get(port, {})
+                    banner = grab_banner(ip, port) if grab_banners else ""
+                    info = identify_from_banner(banner, port)
                     entry = {
                         "port": port,
-                        "service": hints.get("service") or get_service_name(port),
-                        "banner": grab_banner(ip, port) if grab_banners else "",
+                        "service": hints.get("service") or info.service or get_service_name(port),
+                        "protocol": info.protocol,
+                        "product": info.product,
+                        "version": info.version,
+                        "confidence": info.confidence,
+                        "banner": banner,
                         "risk": hints.get("risk", "INFO"),
                         "vuln_hint": hints.get("hint", ""),
                     }
