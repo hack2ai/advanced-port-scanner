@@ -21,15 +21,18 @@ from scanner.reporting import render_html_report
 from scanner.scanner import scan_target
 from scanner.security import RateLimiter, csrf_token, require_csrf, security_headers
 from scanner.utils import audit, parse_port_range, resolve_target, save_csv, save_json, save_txt, setup_logging
+from web.api_v1 import api_v1
 
 app = Flask(__name__, template_folder="templates")
 app.config["JSON_SORT_KEYS"] = False
+app.config["APS_SETTINGS"] = settings
 app.secret_key = settings.secret_key or "development-only-insecure-key"
 app.config["SESSION_COOKIE_HTTPONLY"] = True
 app.config["SESSION_COOKIE_SAMESITE"] = "Lax"
 app.config["SESSION_COOKIE_SECURE"] = settings.secure_cookies
 logger = setup_logging(str(ROOT / "logs"))
 history = ScanHistory(settings.scan_db)
+app.config["APS_HISTORY"] = history
 job_manager = JobManager(max_workers=settings.max_concurrent_jobs, max_queue=16, retention=100)
 auth_limiter = RateLimiter(settings.auth_rate_limit, settings.auth_rate_window)
 scan_limiter = RateLimiter(settings.scan_rate_limit, settings.scan_rate_window)
@@ -63,19 +66,15 @@ def _require(action: str):
                 return view(*args, **kwargs)
             username = session.get("username", "")
             role = session.get("role", "")
+            allowed = role == "admin" or (role == "operator" and action in {"view", "scan", "cancel"}) or (role == "viewer" and action == "view")
             if not username:
                 return jsonify({"error": "Authentication required"}), 401
-            allowed = role == "admin" or (role == "operator" and action in {"view", "scan", "cancel"}) or (role == "viewer" and action == "view")
             if not allowed:
                 audit(logger, "permission_denied", username=username, action=action)
                 return jsonify({"error": "Permission denied"}), 403
             return view(*args, **kwargs)
-        return decorator_body_safe(wrapped)
+        return wrapped
     return decorator
-
-
-def decorator_body_safe(view):
-    return view
 
 
 @app.post("/api/auth/login")
@@ -146,7 +145,7 @@ def _validate_request(body: dict):
         return None, None, None, None, None, f"Port range exceeds configured limit of {settings.max_ports} ports"
     targets = list(dict.fromkeys(t.strip() for t in targets_raw.split(",") if t.strip()))
     if len(targets) > settings.max_targets:
-        return None, None, None, None, None, f"Too many targets; maximum is {settings.max_targets} ports"
+        return None, None, None, None, None, f"Too many targets; maximum is {settings.max_targets}"
     return targets_raw, port_range, scan_type, grab_banner, profile_name or "custom", targets
 
 
@@ -195,10 +194,8 @@ def start_scan():
                 completed_offset += end_port - start_port + 1
                 job_manager.update_progress(job, completed=completed_offset, current_target=target, result_target=target, result=result)
                 continue
-
             def progress(done: int, total: int) -> None:
                 job_manager.update_progress(job, completed=completed_offset + done, current_target=target)
-
             try:
                 result = scan_target(ip, start_port, end_port, scan_type, grab_banner, logger, progress_callback=progress, cancel_event=job.cancel_event)
             except InterruptedError:
@@ -207,10 +204,8 @@ def start_scan():
                 history.save(job.snapshot(include_results=True))
                 audit(logger, "scan_cancelled", job_id=job.job_id)
                 return
-
             completed_offset += end_port - start_port + 1
             job_manager.update_progress(job, completed=completed_offset, current_target=target, total_open=job.total_open + len(result.get("open_ports", [])), result_target=target, result=result)
-
         elapsed = round(max(0.0, time.monotonic() - (job.started_monotonic or time.monotonic())), 2)
         payload = {"schema_version": "1.0", "scan_time": job.started_at or job.created_at, "duration": f"{elapsed}s", "scan_type": job.scan_type, "profile": profile_name, "port_range": job.ports, "total_open": job.total_open, "targets": job.results}
         job.status = "completed"
@@ -224,7 +219,6 @@ def start_scan():
         save_txt(payload, str(report_dir / f"scan_{timestamp}_{job.job_id}.txt"))
         html_path = report_dir / f"scan_{timestamp}_{job.job_id}.html"
         html_path.write_text(render_html_report(payload), encoding="utf-8")
-
     try:
         job = job_manager.submit(targets_raw, f"{start_port}-{end_port}", scan_type, total_work, runner)
     except RuntimeError as exc:
@@ -298,6 +292,9 @@ def html_report(job_id: str):
     }
     audit(logger, "report_viewed", job_id=job_id, format="html", username=session.get("username"))
     return Response(render_html_report(payload), mimetype="text/html")
+
+
+app.register_blueprint(api_v1)
 
 
 if __name__ == "__main__":
