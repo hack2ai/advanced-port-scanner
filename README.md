@@ -4,17 +4,24 @@ A professional Python tool for **authorized network asset discovery**. It provid
 
 > **Authorized use only.** Scan systems you own or have explicit permission to assess.
 
-## What changed in v3
+## Release baseline — v0.1.0
 
-- Fixed the repository/package layout so CLI, web app, Docker, and imports use the same structure.
-- Added input validation and configurable resource limits for web jobs.
-- Reduced scanner concurrency to a safer default and added IPv4/IPv6 connection handling.
-- Added UTC timestamps and a versioned report schema.
-- Added a health endpoint and production Gunicorn container startup.
-- Added non-root container execution, `no-new-privileges`, and dropped Linux capabilities by default.
-- Added automated pytest coverage and GitHub Actions CI.
-- Rebuilt the dashboard around a responsive, lightweight interface.
-- Clarified that risk metadata is informational and is not proof of a vulnerability.
+The `release-v0.1.0` branch consolidates the current professional foundation:
+
+- Clean `scanner/` and `web/` package layout
+- Input validation and configurable resource limits
+- IPv4/IPv6 connection handling and bounded concurrency
+- Persistent SQLite scan history
+- Centralized environment-based configuration
+- Structured JSON audit logging
+- Versioned JSON reports plus CSV/TXT exports
+- Health and job APIs
+- Responsive dashboard
+- Automated pytest suite and GitHub Actions CI
+- Non-root Docker execution, dropped capabilities, and `no-new-privileges`
+- Installable Python package metadata with an `aps` console entry point
+
+Risk metadata is informational guidance, not proof of a vulnerability.
 
 ## Architecture
 
@@ -34,8 +41,9 @@ Concurrent scan engine
      ├── informational risk hints
      └── heuristic TTL/OS indication
      │
-     ▼
-Structured results ──► JSON / CSV / TXT
+     ├──────────────► SQLite scan history
+     │
+     └──────────────► JSON / CSV / TXT reports
 ```
 
 ## Project structure
@@ -44,19 +52,24 @@ Structured results ──► JSON / CSV / TXT
 advanced-port-scanner/
 ├── scanner/
 │   ├── __init__.py
+│   ├── config.py
+│   ├── history.py
 │   ├── scanner.py
 │   ├── utils.py
 │   └── vuln_hints.py
 ├── web/
 │   ├── app.py
-│   └── templates/
-│       └── index.html
+│   └── templates/index.html
 ├── tests/
-│   ├── test_scanner.py
-│   ├── test_utils.py
-│   └── test_web.py
+├── docs/
+│   ├── installation.md
+│   └── configuration.md
+├── data/
+├── reports/
+├── logs/
 ├── .github/workflows/ci.yml
 ├── main.py
+├── pyproject.toml
 ├── requirements.txt
 ├── Dockerfile
 ├── docker-compose.yml
@@ -73,17 +86,28 @@ cd advanced-port-scanner
 python -m venv .venv
 ```
 
-Activate `.venv`, then:
+Activate the environment, then install the package:
 
 ```bash
-python -m pip install -r requirements.txt
+python -m pip install -e .
+```
+
+CLI help:
+
+```bash
+aps --help
+```
+
+The legacy-compatible entry point remains available:
+
+```bash
 python main.py --help
 ```
 
 Example against an authorized local/lab target:
 
 ```bash
-python main.py -t 127.0.0.1 -p 1-1024 --save-json --save-csv --save-txt
+aps scan 127.0.0.1 --ports 1-1024
 ```
 
 ### Dashboard
@@ -94,7 +118,7 @@ python web/app.py
 
 Open `http://127.0.0.1:5000`.
 
-Useful endpoints:
+Current API endpoints:
 
 | Method | Endpoint | Purpose |
 |---|---|---|
@@ -102,6 +126,8 @@ Useful endpoints:
 | POST | `/api/scan` | Queue an authorized scan |
 | GET | `/api/status/<job_id>` | Poll a scan |
 | GET | `/api/jobs` | List recent jobs |
+| GET | `/api/history` | List persisted scan history |
+| GET | `/api/history/<job_id>` | Retrieve persisted scan details |
 
 ### Docker
 
@@ -109,33 +135,27 @@ Useful endpoints:
 docker compose up --build
 ```
 
-The container runs the dashboard through Gunicorn as a non-root user. Reports and logs are persisted in local `reports/` and `logs/` directories.
+The container runs the dashboard through Gunicorn as a non-root user. Reports, database data, and logs are intended to be persisted through the configured local volumes.
 
-SYN mode is **not** enabled by default in the container. If you deliberately need raw packets in an isolated lab, review and explicitly enable the `NET_RAW` capability in `docker-compose.yml`.
+SYN mode is **not** enabled by default in the container. If you deliberately need raw packets in an isolated lab, review and explicitly enable the required capability in `docker-compose.yml`.
 
-## Scanner options
+## Configuration
 
-```text
--t, --targets       Comma-separated IPs/hostnames
--p, --ports         Single port or inclusive range
---scan-type         tcp or syn
---no-banner         Disable lightweight banner collection
---save-json         Export JSON
---save-csv          Export CSV
---save-txt          Export TXT
---output-dir        Report destination
--V, --version       Show scanner version
-```
+Configuration is centralized in `scanner/config.py` and can be overridden with environment variables. See [`docs/configuration.md`](docs/configuration.md).
 
-The web service applies configurable limits:
+Important limits include:
 
 - `MAX_CONCURRENT_JOBS` — default `2`
 - `MAX_TARGETS` — default `16`
 - `MAX_PORTS` — default `4096`
+- scanner socket/banner timeouts
+- database and report paths
 
-## Reports
+## Reports and history
 
-JSON reports include a `schema_version` and `scanner_version` so downstream tooling can evolve safely. CSV contains one row per discovered open port; TXT is intended for quick human review.
+Completed jobs are stored in SQLite for persistent history. JSON reports include schema metadata. CSV contains one row per discovered open port, while TXT is intended for quick human review.
+
+Structured audit events are emitted as JSON logs for operational visibility.
 
 ## Testing
 
@@ -145,26 +165,27 @@ Run the local test suite:
 python -m pytest -q
 ```
 
-GitHub Actions runs the suite on supported Python 3.11–3.13 environments.
+GitHub Actions runs the configured test matrix.
 
 ## Security notes
 
+- Scan only systems you own or have explicit permission to assess.
 - Open ports indicate reachability, not vulnerability.
 - Risk hints are static defensive guidance and should be validated against authoritative vulnerability intelligence.
 - Banner collection is intentionally small and non-invasive.
 - TTL-based OS identification is heuristic and can be affected by routing and network devices.
-- The web API is designed for local/controlled deployment. Put it behind authentication, TLS, and network access controls before exposing it to untrusted users.
-- Do not add stealth, credential attacks, exploitation, or evasion features to this project.
+- Before exposing the web API beyond a trusted local/controlled environment, add authentication, TLS, and network access controls.
+- Do not add credential attacks, exploitation, stealth, or evasion functionality.
 
 ## Roadmap
 
-- [ ] Persistent scan history
-- [ ] Authentication and role-based authorization for the dashboard
-- [ ] Structured audit events
+- [ ] Authentication and role-based authorization
+- [ ] Dedicated job manager with cooperative cancellation and accurate progress
 - [ ] Improved service identification
 - [ ] Optional authoritative CVE enrichment
-- [ ] Export filtering and report templates
-- [ ] Packaging as an installable CLI (`pipx` friendly)
+- [ ] HTML report templates
+- [ ] Expanded analytics dashboard
+- [ ] `pipx` release workflow
 
 ## License
 
