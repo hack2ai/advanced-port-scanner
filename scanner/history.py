@@ -34,11 +34,11 @@ class ScanHistory:
                 job["targets"], job["ports"], job["scan_type"], job.get("total_open", 0),
                 json.dumps(job.get("results", {})),))
 
-    def list(self, limit: int = 50) -> list[dict[str, Any]]:
+    def list(self, limit: int = 50, include_results: bool = False) -> list[dict[str, Any]]:
         limit = max(1, min(int(limit), 200))
         with self._connect() as conn:
             rows = conn.execute("SELECT * FROM scans ORDER BY started_at DESC LIMIT ?", (limit,)).fetchall()
-        return [self._row(row, False) for row in rows]
+        return [self._row(row, include_results) for row in rows]
 
     def get(self, job_id: str) -> dict[str, Any] | None:
         with self._connect() as conn:
