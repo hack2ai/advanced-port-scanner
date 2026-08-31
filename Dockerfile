@@ -1,35 +1,32 @@
-# ── Dockerfile — Advanced Port Scanner ───────────────────────────────────────
-#
-# Build:   docker build -t port-scanner .
-# Run CLI: docker run --rm -it port-scanner python main.py -t <target> -p 1-1024
-# Run Web: docker run --rm -p 5000:5000 port-scanner python web/app.py
-# ─────────────────────────────────────────────────────────────────────────────
+FROM python:3.12-slim
 
-FROM python:3.11-slim
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    PIP_NO_CACHE_DIR=1 \
+    HOST=0.0.0.0 \
+    PORT=5000
 
-# System dependencies (ping for OS fingerprinting, net-tools for debugging)
-RUN apt-get update && apt-get install -y --no-install-recommends \
-      iputils-ping \
-      net-tools \
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends iputils-ping \
     && rm -rf /var/lib/apt/lists/*
 
-# Working directory
 WORKDIR /app
 
-# Install Python dependencies first (layer cache friendly)
-COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+COPY requirements.txt ./
+RUN python -m pip install --no-cache-dir -r requirements.txt
 
-# Copy project files
-COPY scanner/    ./scanner/
-COPY web/        ./web/
-COPY main.py     .
+COPY scanner/ ./scanner/
+COPY web/ ./web/
+COPY main.py ./main.py
+COPY README.md ./README.md
 
-# Create output/log directories
-RUN mkdir -p reports logs
+RUN mkdir -p /app/reports /app/logs \
+    && useradd --create-home --uid 10001 scanner \
+    && chown -R scanner:scanner /app
+USER scanner
 
-# Expose Flask port
 EXPOSE 5000
+HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
+  CMD python -c "import urllib.request; urllib.request.urlopen('http://127.0.0.1:5000/api/health', timeout=3)"
 
-# Default: launch the web dashboard
-CMD ["python", "web/app.py"]
+CMD ["gunicorn", "--workers", "2", "--threads", "4", "--timeout", "120", "--bind", "0.0.0.0:5000", "web.app:app"]
