@@ -1,5 +1,6 @@
 # Runtime dependencies
 Flask>=3.0,<4
+gunicorn>=22,<24
 tqdm>=4.66,<5
 rich>=13.7,<15
 
