@@ -14,6 +14,7 @@ sys.path.insert(0, str(ROOT))
 from scanner.config import settings
 from scanner.history import ScanHistory
 from scanner.jobs import JobManager, ScanJob
+from scanner.profiles import get_profile, list_profiles
 from scanner.scanner import scan_target
 from scanner.utils import audit, parse_port_range, resolve_target, save_csv, save_json, save_txt, setup_logging
 
@@ -30,23 +31,33 @@ def _utc_now() -> str:
 
 def _validate_request(body: dict):
     targets_raw = str(body.get("targets", "")).strip()
-    ports_raw = str(body.get("ports", "1-1024")).strip()
+    profile_name = str(body.get("profile", "")).strip().lower()
+    ports_raw = str(body.get("ports", "")).strip()
     scan_type = str(body.get("scan_type", "tcp")).lower()
     grab_banner = bool(body.get("grab_banner", True))
     if not targets_raw:
-        return None, None, None, None, "No targets provided"
+        return None, None, None, None, None, "No targets provided"
     if scan_type not in {"tcp", "syn"}:
-        return None, None, None, None, "scan_type must be 'tcp' or 'syn'"
+        return None, None, None, None, None, "scan_type must be 'tcp' or 'syn'"
+    if profile_name:
+        profile = get_profile(profile_name)
+        if profile is None:
+            return None, None, None, None, None, "Unknown scan profile"
+        if ports_raw:
+            return None, None, None, None, None, "Specify either profile or ports, not both"
+        ports_raw = profile.port_range
+    else:
+        ports_raw = ports_raw or "1-1024"
     port_range = parse_port_range(ports_raw)
     if not port_range:
-        return None, None, None, None, "Invalid port range"
+        return None, None, None, None, None, "Invalid port range"
     start, end = port_range
     if end - start + 1 > settings.max_ports:
-        return None, None, None, None, f"Port range exceeds configured limit of {settings.max_ports} ports"
+        return None, None, None, None, None, f"Port range exceeds configured limit of {settings.max_ports} ports"
     targets = list(dict.fromkeys(t.strip() for t in targets_raw.split(",") if t.strip()))
     if len(targets) > settings.max_targets:
-        return None, None, None, None, f"Too many targets; maximum is {settings.max_targets}"
-    return targets_raw, port_range, scan_type, grab_banner, targets
+        return None, None, None, None, None, f"Too many targets; maximum is {settings.max_targets}"
+    return targets_raw, port_range, scan_type, grab_banner, profile_name or "custom", targets
 
 
 @app.get("/")
@@ -59,12 +70,17 @@ def health():
     return jsonify({"status": "ok", "service": "advanced-port-scanner", "time": _utc_now()})
 
 
+@app.get("/api/profiles")
+def profiles():
+    return jsonify(list_profiles())
+
+
 @app.post("/api/scan")
 def start_scan():
     body = request.get_json(silent=True)
     if not isinstance(body, dict):
         return jsonify({"error": "Request body must be JSON"}), 400
-    targets_raw, port_range, scan_type, grab_banner, targets_or_error = _validate_request(body)
+    targets_raw, port_range, scan_type, grab_banner, profile_name, targets_or_error = _validate_request(body)
     if targets_raw is None:
         return jsonify({"error": targets_or_error}), 400
     targets = targets_or_error
@@ -82,37 +98,16 @@ def start_scan():
             job.current_target = target
             ip = resolve_target(target, logger)
             if not ip:
-                result = {
-                    "ip": None,
-                    "open_ports": [],
-                    "os_guess": "Unknown",
-                    "ttl": None,
-                    "error": "Target could not be resolved",
-                }
+                result = {"ip": None, "open_ports": [], "os_guess": "Unknown", "ttl": None, "error": "Target could not be resolved"}
                 completed_offset += end_port - start_port + 1
-                job_manager.update_progress(
-                    job,
-                    completed=completed_offset,
-                    current_target=target,
-                    result_target=target,
-                    result=result,
-                )
+                job_manager.update_progress(job, completed=completed_offset, current_target=target, result_target=target, result=result)
                 continue
 
             def progress(done: int, total: int) -> None:
                 job_manager.update_progress(job, completed=completed_offset + done, current_target=target)
 
             try:
-                result = scan_target(
-                    ip,
-                    start_port,
-                    end_port,
-                    scan_type,
-                    grab_banner,
-                    logger,
-                    progress_callback=progress,
-                    cancel_event=job.cancel_event,
-                )
+                result = scan_target(ip, start_port, end_port, scan_type, grab_banner, logger, progress_callback=progress, cancel_event=job.cancel_event)
             except InterruptedError:
                 job.status = "cancelled"
                 job.finished_at = _utc_now()
@@ -121,28 +116,10 @@ def start_scan():
                 return
 
             completed_offset += end_port - start_port + 1
-            job_manager.update_progress(
-                job,
-                completed=completed_offset,
-                current_target=target,
-                total_open=job.total_open + len(result.get("open_ports", [])),
-                result_target=target,
-                result=result,
-            )
-            job.current_target = target
+            job_manager.update_progress(job, completed=completed_offset, current_target=target, total_open=job.total_open + len(result.get("open_ports", [])), result_target=target, result=result)
 
-        elapsed = 0.0
-        if job.started_monotonic is not None:
-            elapsed = round(max(0.0, time.monotonic() - job.started_monotonic), 2)
-        payload = {
-            "schema_version": "1.0",
-            "scan_time": job.started_at or job.created_at,
-            "duration": f"{elapsed}s",
-            "scan_type": job.scan_type,
-            "port_range": job.ports,
-            "total_open": job.total_open,
-            "targets": job.results,
-        }
+        elapsed = round(max(0.0, time.monotonic() - (job.started_monotonic or time.monotonic())), 2)
+        payload = {"schema_version": "1.0", "scan_time": job.started_at or job.created_at, "duration": f"{elapsed}s", "scan_type": job.scan_type, "profile": profile_name, "port_range": job.ports, "total_open": job.total_open, "targets": job.results}
         job.status = "completed"
         job.finished_at = _utc_now()
         history.save(job.snapshot(include_results=True) | {"duration": elapsed})
@@ -157,9 +134,8 @@ def start_scan():
         job = job_manager.submit(targets_raw, f"{start_port}-{end_port}", scan_type, total_work, runner)
     except RuntimeError as exc:
         return jsonify({"error": str(exc)}), 429
-
-    audit(logger, "scan_queued", job_id=job.job_id, target_count=len(targets), total_work=total_work)
-    return jsonify({"job_id": job.job_id, "status": job.status}), 202
+    audit(logger, "scan_queued", job_id=job.job_id, target_count=len(targets), total_work=total_work, profile=profile_name)
+    return jsonify({"job_id": job.job_id, "status": job.status, "profile": profile_name}), 202
 
 
 @app.get("/api/status/<job_id>")
