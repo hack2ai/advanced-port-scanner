@@ -1,0 +1,44 @@
+"""Centralized configuration with environment-variable overrides."""
+from __future__ import annotations
+import os
+from dataclasses import dataclass
+
+
+def _int(name: str, default: int, minimum: int, maximum: int) -> int:
+    try:
+        value = int(os.getenv(name, str(default)))
+    except ValueError:
+        value = default
+    return max(minimum, min(value, maximum))
+
+
+@dataclass(frozen=True)
+class Settings:
+    host: str
+    port: int
+    max_concurrent_jobs: int
+    max_targets: int
+    max_ports: int
+    socket_timeout: float
+    banner_timeout: float
+    log_level: str
+    scan_db: str
+    reports_dir: str
+
+
+def load_settings() -> Settings:
+    return Settings(
+        host=os.getenv("HOST", "127.0.0.1"),
+        port=_int("PORT", 5000, 1, 65535),
+        max_concurrent_jobs=_int("MAX_CONCURRENT_JOBS", 2, 1, 32),
+        max_targets=_int("MAX_TARGETS", 16, 1, 256),
+        max_ports=_int("MAX_PORTS", 4096, 1, 65535),
+        socket_timeout=max(0.1, min(float(os.getenv("SOCKET_TIMEOUT", "0.5")), 10.0)),
+        banner_timeout=max(0.1, min(float(os.getenv("BANNER_TIMEOUT", "0.75")), 10.0)),
+        log_level=os.getenv("LOG_LEVEL", "INFO").upper(),
+        scan_db=os.getenv("SCAN_DB", "data/scans.db"),
+        reports_dir=os.getenv("REPORTS_DIR", "reports"),
+    )
+
+
+settings = load_settings()
