@@ -6,7 +6,7 @@ import time
 from datetime import datetime, timezone
 from pathlib import Path
 
-from flask import Flask, jsonify, render_template, request
+from flask import Flask, Response, jsonify, render_template, request
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
@@ -15,6 +15,7 @@ from scanner.config import settings
 from scanner.history import ScanHistory
 from scanner.jobs import JobManager, ScanJob
 from scanner.profiles import get_profile, list_profiles
+from scanner.reporting import render_html_report
 from scanner.scanner import scan_target
 from scanner.utils import audit, parse_port_range, resolve_target, save_csv, save_json, save_txt, setup_logging
 
@@ -129,6 +130,8 @@ def start_scan():
         save_json(payload, str(report_dir / f"scan_{timestamp}_{job.job_id}.json"))
         save_csv(payload, str(report_dir / f"scan_{timestamp}_{job.job_id}.csv"))
         save_txt(payload, str(report_dir / f"scan_{timestamp}_{job.job_id}.txt"))
+        html_path = report_dir / f"scan_{timestamp}_{job.job_id}.html"
+        html_path.write_text(render_html_report(payload), encoding="utf-8")
 
     try:
         job = job_manager.submit(targets_raw, f"{start_port}-{end_port}", scan_type, total_work, runner)
@@ -177,6 +180,26 @@ def list_history():
 def history_detail(job_id: str):
     item = history.get(job_id)
     return jsonify(item) if item else (jsonify({"error": "History entry not found"}), 404)
+
+
+@app.get("/api/reports/<job_id>/html")
+def html_report(job_id: str):
+    item = history.get(job_id)
+    if not item:
+        return jsonify({"error": "History entry not found"}), 404
+    payload = {
+        "schema_version": item.get("schema_version", "1.0"),
+        "scanner_version": item.get("scanner_version", "3.0.0"),
+        "scan_time": item.get("started_at") or item.get("created_at") or _utc_now(),
+        "duration": str(item.get("duration", item.get("elapsed_seconds", "N/A"))),
+        "scan_type": item.get("scan_type", "N/A"),
+        "profile": item.get("profile", "custom"),
+        "port_range": item.get("ports", "N/A"),
+        "total_open": item.get("total_open", 0),
+        "targets": item.get("results", {}),
+    }
+    audit(logger, "report_viewed", job_id=job_id, format="html")
+    return Response(render_html_report(payload), mimetype="text/html")
 
 
 if __name__ == "__main__":
