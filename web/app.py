@@ -4,13 +4,15 @@ from __future__ import annotations
 import sys
 import time
 from datetime import datetime, timezone
+from functools import wraps
 from pathlib import Path
 
-from flask import Flask, Response, jsonify, render_template, request
+from flask import Flask, Response, jsonify, render_template, request, session
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
+from scanner.auth import authenticate
 from scanner.config import settings
 from scanner.history import ScanHistory
 from scanner.jobs import JobManager, ScanJob
@@ -21,13 +23,76 @@ from scanner.utils import audit, parse_port_range, resolve_target, save_csv, sav
 
 app = Flask(__name__, template_folder="templates")
 app.config["JSON_SORT_KEYS"] = False
+app.secret_key = settings.secret_key or "development-only-insecure-key"
+app.config["SESSION_COOKIE_HTTPONLY"] = True
+app.config["SESSION_COOKIE_SAMESITE"] = "Lax"
+app.config["SESSION_COOKIE_SECURE"] = settings.secure_cookies
 logger = setup_logging(str(ROOT / "logs"))
 history = ScanHistory(settings.scan_db)
 job_manager = JobManager(max_workers=settings.max_concurrent_jobs, max_queue=16, retention=100)
 
+if settings.auth_enabled and (not settings.secret_key or not settings.auth_username or not settings.auth_password_hash):
+    raise RuntimeError("AUTH_ENABLED requires SECRET_KEY, AUTH_USERNAME, and AUTH_PASSWORD_HASH")
+if settings.auth_role not in {"viewer", "operator", "admin"}:
+    raise RuntimeError("AUTH_ROLE must be viewer, operator, or admin")
+
 
 def _utc_now() -> str:
     return datetime.now(timezone.utc).isoformat()
+
+
+def _require(action: str):
+    def decorator(view):
+        @wraps(view)
+        def wrapped(*args, **kwargs):
+            if not settings.auth_enabled:
+                return view(*args, **kwargs)
+            username = session.get("username", "")
+            role = session.get("role", "")
+            if not username:
+                return jsonify({"error": "Authentication required"}), 401
+            allowed = role == "admin" or (role == "operator" and action in {"view", "scan", "cancel"}) or (role == "viewer" and action == "view")
+            if not allowed:
+                audit(logger, "permission_denied", username=username, action=action)
+                return jsonify({"error": "Permission denied"}), 403
+            return view(*args, **kwargs)
+        return wrapped
+    return decorator
+
+
+@app.post("/api/auth/login")
+def login():
+    if not settings.auth_enabled:
+        return jsonify({"error": "Authentication is disabled"}), 400
+    body = request.get_json(silent=True)
+    if not isinstance(body, dict):
+        return jsonify({"error": "Request body must be JSON"}), 400
+    user = authenticate(str(body.get("username", "")), str(body.get("password", "")), settings.auth_username, settings.auth_password_hash, settings.auth_role)
+    if user is None:
+        audit(logger, "auth.login.failure")
+        return jsonify({"error": "Invalid credentials"}), 401
+    session.clear()
+    session["username"] = user.username
+    session["role"] = user.role
+    audit(logger, "auth.login.success", username=user.username, role=user.role)
+    return jsonify({"username": user.username, "role": user.role})
+
+
+@app.post("/api/auth/logout")
+def logout():
+    username = session.get("username")
+    session.clear()
+    if username:
+        audit(logger, "auth.logout", username=username)
+    return jsonify({"status": "ok"})
+
+
+@app.get("/api/auth/me")
+def me():
+    if not settings.auth_enabled:
+        return jsonify({"authenticated": False, "auth_enabled": False})
+    username = session.get("username")
+    return jsonify({"authenticated": bool(username), "username": username, "role": session.get("role")})
 
 
 def _validate_request(body: dict):
@@ -68,7 +133,7 @@ def index():
 
 @app.get("/api/health")
 def health():
-    return jsonify({"status": "ok", "service": "advanced-port-scanner", "time": _utc_now()})
+    return jsonify({"status": "ok", "service": "advanced-port-scanner", "time": _utc_now(), "auth_enabled": settings.auth_enabled})
 
 
 @app.get("/api/profiles")
@@ -77,6 +142,7 @@ def profiles():
 
 
 @app.post("/api/scan")
+@_require("scan")
 def start_scan():
     body = request.get_json(silent=True)
     if not isinstance(body, dict):
@@ -142,6 +208,7 @@ def start_scan():
 
 
 @app.get("/api/status/<job_id>")
+@_require("view")
 def status(job_id: str):
     job = job_manager.get(job_id)
     if job is not None:
@@ -151,23 +218,26 @@ def status(job_id: str):
 
 
 @app.post("/api/status/<job_id>/cancel")
+@_require("cancel")
 def cancel(job_id: str):
     if not job_manager.cancel(job_id):
         job = job_manager.get(job_id)
         if job is None:
             return jsonify({"error": "Job not found or already expired"}), 404
         return jsonify({"error": "Job is already finished"}), 409
-    audit(logger, "scan_cancel_requested", job_id=job_id)
+    audit(logger, "scan_cancel_requested", job_id=job_id, username=session.get("username"))
     job = job_manager.get(job_id)
     return jsonify(job.snapshot(include_results=True))
 
 
 @app.get("/api/jobs")
+@_require("view")
 def list_jobs():
     return jsonify(job_manager.list(50))
 
 
 @app.get("/api/history")
+@_require("view")
 def list_history():
     try:
         limit = max(1, min(int(request.args.get("limit", 50)), 200))
@@ -177,12 +247,14 @@ def list_history():
 
 
 @app.get("/api/history/<job_id>")
+@_require("view")
 def history_detail(job_id: str):
     item = history.get(job_id)
     return jsonify(item) if item else (jsonify({"error": "History entry not found"}), 404)
 
 
 @app.get("/api/reports/<job_id>/html")
+@_require("view")
 def html_report(job_id: str):
     item = history.get(job_id)
     if not item:
@@ -198,7 +270,7 @@ def html_report(job_id: str):
         "total_open": item.get("total_open", 0),
         "targets": item.get("results", {}),
     }
-    audit(logger, "report_viewed", job_id=job_id, format="html")
+    audit(logger, "report_viewed", job_id=job_id, format="html", username=session.get("username"))
     return Response(render_html_report(payload), mimetype="text/html")
 
 
