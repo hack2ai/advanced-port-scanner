@@ -45,6 +45,10 @@ class Settings:
     auth_role: str
     secret_key: str
     secure_cookies: bool
+    auth_rate_limit: int
+    auth_rate_window: int
+    scan_rate_limit: int
+    scan_rate_window: int
 
 
 def load_settings() -> Settings:
@@ -65,6 +69,10 @@ def load_settings() -> Settings:
         auth_role=os.getenv("AUTH_ROLE", "operator").lower(),
         secret_key=os.getenv("SECRET_KEY", ""),
         secure_cookies=_bool("SECURE_COOKIES", False),
+        auth_rate_limit=_int("AUTH_RATE_LIMIT", 5, 1, 100),
+        auth_rate_window=_int("AUTH_RATE_WINDOW", 60, 10, 3600),
+        scan_rate_limit=_int("SCAN_RATE_LIMIT", 10, 1, 1000),
+        scan_rate_window=_int("SCAN_RATE_WINDOW", 60, 10, 3600),
     )
 
 
