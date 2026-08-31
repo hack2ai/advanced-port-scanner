@@ -1,6 +1,6 @@
 # Advanced Port Scanner
 
-A professional Python tool for **authorized network asset discovery**. It provides a focused CLI, a Flask dashboard/API, concurrent TCP discovery, optional lab-only SYN probing, lightweight service banners, informational risk hints, and JSON/CSV/TXT reporting.
+A professional Python tool for **authorized network asset discovery**. It provides a focused CLI, a Flask dashboard/API, concurrent TCP discovery, optional lab-only SYN probing, lightweight service banners, informational risk hints, and JSON/CSV/TXT/HTML reporting.
 
 > **Authorized use only.** Scan systems you own or have explicit permission to assess.
 
@@ -14,9 +14,12 @@ The `release-v0.1.0` branch consolidates the current professional foundation:
 - Persistent SQLite scan history
 - Centralized environment-based configuration
 - Structured JSON audit logging
-- Versioned JSON reports plus CSV/TXT exports
-- Health and job APIs
-- Responsive dashboard
+- Versioned JSON reports plus CSV/TXT/HTML exports
+- Bounded asynchronous job manager with cancellation and live progress
+- Scan profiles (`quick`, `standard`, `extended`, `full`)
+- Lightweight service fingerprinting with confidence metadata
+- Health, job, history, profile, and HTML report APIs
+- Responsive dashboard with live job status and history
 - Automated pytest suite and GitHub Actions CI
 - Non-root Docker execution, dropped capabilities, and `no-new-privileges`
 - Installable Python package metadata with an `aps` console entry point
@@ -32,10 +35,14 @@ CLI / Web UI
 Input validation ──► target resolution
      │
      ▼
+Job Manager ──► bounded workers + cancellation + progress
+     │
+     ▼
 Concurrent scan engine
      ├── TCP Connect
      ├── optional SYN (controlled lab)
-     └── lightweight banner probe
+     ├── lightweight banner probe
+     └── service fingerprinting
      │
      ├── service metadata
      ├── informational risk hints
@@ -43,7 +50,7 @@ Concurrent scan engine
      │
      ├──────────────► SQLite scan history
      │
-     └──────────────► JSON / CSV / TXT reports
+     └──────────────► JSON / CSV / TXT / HTML reports
 ```
 
 ## Project structure
@@ -54,7 +61,11 @@ advanced-port-scanner/
 │   ├── __init__.py
 │   ├── config.py
 │   ├── history.py
+│   ├── jobs.py
+│   ├── profiles.py
+│   ├── reporting.py
 │   ├── scanner.py
+│   ├── service_detection.py
 │   ├── utils.py
 │   └── vuln_hints.py
 ├── web/
@@ -98,15 +109,11 @@ CLI help:
 aps --help
 ```
 
-The legacy-compatible entry point remains available:
+Examples against authorized local/lab targets:
 
 ```bash
-python main.py --help
-```
-
-Example against an authorized local/lab target:
-
-```bash
+aps scan 127.0.0.1 --profile quick
+aps scan 127.0.0.1 --profile standard
 aps scan 127.0.0.1 --ports 1-1024
 ```
 
@@ -123,11 +130,14 @@ Current API endpoints:
 | Method | Endpoint | Purpose |
 |---|---|---|
 | GET | `/api/health` | Health check |
+| GET | `/api/profiles` | Available scan profiles |
 | POST | `/api/scan` | Queue an authorized scan |
 | GET | `/api/status/<job_id>` | Poll a scan |
+| POST | `/api/status/<job_id>/cancel` | Request cooperative cancellation |
 | GET | `/api/jobs` | List recent jobs |
 | GET | `/api/history` | List persisted scan history |
 | GET | `/api/history/<job_id>` | Retrieve persisted scan details |
+| GET | `/api/reports/<job_id>/html` | Render a persisted HTML report |
 
 ### Docker
 
@@ -151,9 +161,20 @@ Important limits include:
 - scanner socket/banner timeouts
 - database and report paths
 
+## Scan profiles
+
+```text
+quick       1-100
+standard    1-1024
+extended    1-10000
+full        1-65535
+```
+
+Profiles still pass through the configured `MAX_PORTS` limit; presets cannot bypass server resource controls.
+
 ## Reports and history
 
-Completed jobs are stored in SQLite for persistent history. JSON reports include schema metadata. CSV contains one row per discovered open port, while TXT is intended for quick human review.
+Completed jobs are stored in SQLite for persistent history. Reports use one structured result model and can be rendered as JSON, CSV, TXT, or HTML. The HTML report includes scan metadata, target results, services, risk guidance, and an authorized-use notice.
 
 Structured audit events are emitted as JSON logs for operational visibility.
 
@@ -172,6 +193,7 @@ GitHub Actions runs the configured test matrix.
 - Scan only systems you own or have explicit permission to assess.
 - Open ports indicate reachability, not vulnerability.
 - Risk hints are static defensive guidance and should be validated against authoritative vulnerability intelligence.
+- Service fingerprinting uses lightweight protocol/banner observations and reports confidence rather than claiming certainty.
 - Banner collection is intentionally small and non-invasive.
 - TTL-based OS identification is heuristic and can be affected by routing and network devices.
 - Before exposing the web API beyond a trusted local/controlled environment, add authentication, TLS, and network access controls.
@@ -180,13 +202,11 @@ GitHub Actions runs the configured test matrix.
 ## Roadmap
 
 - [ ] Authentication and role-based authorization
-- [ ] Dedicated job manager with cooperative cancellation and accurate progress
-- [ ] Improved service identification
-- [ ] Optional authoritative CVE enrichment
-- [ ] HTML report templates
+- [ ] API v1 migration with compatibility/deprecation strategy
 - [ ] Expanded analytics dashboard
+- [ ] Optional authoritative CVE enrichment
 - [ ] `pipx` release workflow
 
 ## License
 
-See the repository license file for the applicable project license.
+See [`LICENSE`](LICENSE).
