@@ -1,11 +1,12 @@
-"""Versioned API helpers for the Advanced Port Scanner."""
+"""Versioned API endpoints for the Advanced Port Scanner."""
 from __future__ import annotations
 
+from datetime import datetime, timezone
 from functools import wraps
-from typing import Any, Callable
+from typing import Any
 from uuid import uuid4
 
-from flask import Blueprint, g, jsonify, request
+from flask import Blueprint, Response, current_app, g, jsonify, request, session
 
 api_v1 = Blueprint("api_v1", __name__, url_prefix="/api/v1")
 
@@ -13,7 +14,7 @@ api_v1 = Blueprint("api_v1", __name__, url_prefix="/api/v1")
 def request_id() -> str:
     value = getattr(g, "request_id", None)
     if value is None:
-        value = uuid4().hex
+        value = request.headers.get("X-Request-ID") or uuid4().hex
         g.request_id = value
     return value
 
@@ -21,28 +22,34 @@ def request_id() -> str:
 def data_response(data: Any, status: int = 200):
     response = jsonify({"data": data, "request_id": request_id()})
     response.status_code = status
-    response.headers["X-Request-ID"] = request_id()
     return response
 
 
 def error_response(code: str, message: str, status: int):
     response = jsonify({"error": {"code": code, "message": message}, "request_id": request_id()})
     response.status_code = status
-    response.headers["X-Request-ID"] = request_id()
     return response
 
 
-def _auth_required(view: Callable[..., Any]):
-    @wraps(view)
-    def wrapped(*args, **kwargs):
-        # v1 routes are registered by the Flask application and may reuse its
-        # existing authentication decorator. This guard only normalizes the
-        # failure shape when no authenticated principal is present.
-        if request.environ.get("APS_API_V1_AUTH_REQUIRED") == "1" and not getattr(g, "principal", None):
-            return error_response("AUTH_REQUIRED", "Authentication required", 401)
-        return view(*args, **kwargs)
-
-    return wrapped
+def _require(action: str):
+    def decorator(view):
+        @wraps(view)
+        def wrapped(*args, **kwargs):
+            settings = current_app.config["APS_SETTINGS"]
+            if not settings.auth_enabled:
+                return view(*args, **kwargs)
+            username = session.get("username", "")
+            role = session.get("role", "")
+            allowed = bool(username) and (
+                role == "admin"
+                or (role == "operator" and action in {"view", "scan", "cancel"})
+                or (role == "viewer" and action == "view")
+            )
+            if not allowed:
+                return error_response("AUTH_REQUIRED" if not username else "FORBIDDEN", "Authentication required" if not username else "Permission denied", 401 if not username else 403)
+            return view(*args, **kwargs)
+        return wrapped
+    return decorator
 
 
 @api_v1.after_request
@@ -53,40 +60,124 @@ def add_request_id(response):
 
 @api_v1.get("/health")
 def health():
-    return data_response({"status": "ok", "service": "advanced-port-scanner"})
+    settings = current_app.config["APS_SETTINGS"]
+    return data_response({"status": "ok", "service": "advanced-port-scanner", "auth_enabled": settings.auth_enabled})
 
 
 @api_v1.get("/profiles")
 def profiles():
     from scanner.profiles import list_profiles
-
     return data_response(list_profiles())
 
 
-# These thin endpoints deliberately delegate through application callbacks.
-# The app can inject concrete handlers when registering the blueprint.
-def configure_callbacks(*, list_jobs=None, list_history=None, analytics=None):
-    if list_jobs is not None:
-        api_v1.view_functions["api_v1.list_jobs"] = list_jobs
-    if list_history is not None:
-        api_v1.view_functions["api_v1.list_history"] = list_history
-    if analytics is not None:
-        api_v1.view_functions["api_v1.analytics"] = analytics
+@api_v1.post("/scans")
+@_require("scan")
+def create_scan():
+    """Delegate scan creation to the legacy route implementation."""
+    app = current_app
+    with app.test_request_context(request.path, method=request.method, json=request.get_json(silent=True), headers=dict(request.headers)):
+        result = app.view_functions["start_scan"]()
+    if isinstance(result, tuple):
+        body, status = result
+        payload = body.get_json() if hasattr(body, "get_json") else {"error": "Request failed"}
+        return error_response("SCAN_REQUEST_FAILED", payload.get("error", "Request failed"), status)
+    payload = result.get_json()
+    return data_response(payload, result.status_code)
+
+
+@api_v1.get("/scans/<job_id>")
+@_require("view")
+def get_scan(job_id: str):
+    app = current_app
+    with app.test_request_context(f"/api/status/{job_id}", method="GET"):
+        result = app.view_functions["status"](job_id)
+    if isinstance(result, tuple):
+        body, status = result
+        payload = body.get_json()
+        return error_response("SCAN_NOT_FOUND", payload.get("error", "Job not found"), status)
+    return data_response(result.get_json(), result.status_code)
+
+
+@api_v1.post("/scans/<job_id>/cancel")
+@_require("cancel")
+def cancel_scan(job_id: str):
+    app = current_app
+    with app.test_request_context(f"/api/status/{job_id}/cancel", method="POST", json={}):
+        if session:
+            pass
+        result = app.view_functions["cancel"](job_id)
+    if isinstance(result, tuple):
+        body, status = result
+        payload = body.get_json()
+        return error_response("SCAN_CANCEL_FAILED", payload.get("error", "Unable to cancel scan"), status)
+    return data_response(result.get_json(), result.status_code)
 
 
 @api_v1.get("/jobs")
-@_auth_required
+@_require("view")
 def list_jobs():
-    return data_response([])
+    app = current_app
+    result = app.view_functions["list_jobs"]()
+    return data_response(result.get_json(), result.status_code)
 
 
 @api_v1.get("/history")
-@_auth_required
+@_require("view")
 def list_history():
-    return data_response([])
+    app = current_app
+    result = app.view_functions["list_history"]()
+    return data_response(result.get_json(), result.status_code)
+
+
+@api_v1.get("/history/<job_id>")
+@_require("view")
+def history_detail(job_id: str):
+    app = current_app
+    result = app.view_functions["history_detail"](job_id)
+    if isinstance(result, tuple):
+        body, status = result
+        payload = body.get_json()
+        return error_response("HISTORY_NOT_FOUND", payload.get("error", "History entry not found"), status)
+    return data_response(result.get_json(), result.status_code)
+
+
+@api_v1.get("/reports/<job_id>/html")
+@_require("view")
+def html_report(job_id: str):
+    app = current_app
+    result = app.view_functions["html_report"](job_id)
+    if isinstance(result, tuple):
+        body, status = result
+        payload = body.get_json()
+        return error_response("REPORT_NOT_FOUND", payload.get("error", "Report not found"), status)
+    return result
 
 
 @api_v1.get("/analytics")
-@_auth_required
+@_require("view")
 def analytics():
-    return data_response({"scans": 0, "targets": 0, "open_ports": 0})
+    history = current_app.config["APS_HISTORY"]
+    items = history.list(200)
+    total_scans = len(items)
+    targets = set()
+    open_ports = 0
+    risk_counts = {"CRITICAL": 0, "HIGH": 0, "MEDIUM": 0, "LOW": 0, "INFO": 0}
+    services: dict[str, int] = {}
+    for item in items:
+        for target, result in (item.get("results") or {}).items():
+            targets.add(target)
+            for port in result.get("open_ports") or []:
+                open_ports += 1
+                risk = port.get("risk", "INFO")
+                risk_counts[risk] = risk_counts.get(risk, 0) + 1
+                service = str(port.get("service", "unknown"))
+                services[service] = services.get(service, 0) + 1
+    top_services = dict(sorted(services.items(), key=lambda pair: (-pair[1], pair[0]))[:10])
+    return data_response({
+        "scans": total_scans,
+        "targets": len(targets),
+        "open_ports": open_ports,
+        "risk_distribution": risk_counts,
+        "top_services": top_services,
+        "generated_at": datetime.now(timezone.utc).isoformat(),
+    })
