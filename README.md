@@ -9,7 +9,7 @@
   <a href="https://github.com/hack2ai/advanced-port-scanner/actions/workflows/ci.yml"><img src="https://github.com/hack2ai/advanced-port-scanner/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
   <a href="https://github.com/hack2ai/advanced-port-scanner/blob/main/LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue.svg" alt="MIT License"></a>
   <img src="https://img.shields.io/badge/python-3.11%2B-blue.svg" alt="Python 3.11+">
-  <img src="https://img.shields.io/badge/release-0.2.0-informational.svg" alt="v0.2.0">
+  <img src="https://img.shields.io/badge/release-0.2.1-informational.svg" alt="v0.2.1">
 </p>
 
 > **Authorized use only.** Scan systems you own or have explicit permission to assess.
@@ -335,8 +335,10 @@ The Compose configuration:
 - runs the application as a non-root user
 - drops Linux capabilities
 - enables `no-new-privileges`
-- persists `data/`, `reports/`, and `logs/`
+- persists data, reports, and logs using Docker-managed volumes
 - keeps SYN/raw-packet capability disabled by default
+
+The container intentionally uses one Gunicorn worker with multiple threads because scan job state and rate-limit state are process-local. Multi-process scaling requires a shared job/rate-limit backend.
 
 For authorized lab environments that require SYN mode, review the commented capability configuration in `docker-compose.yml` and enable it deliberately.
 
@@ -406,7 +408,7 @@ When changing API or deployment behavior, add or update regression coverage in `
 
 ## Release
 
-Current application version: **0.2.0**.
+Current application version: **0.2.1**.
 
 See [`CHANGELOG.md`](CHANGELOG.md) for release history.
 
