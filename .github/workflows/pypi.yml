@@ -9,9 +9,9 @@ on:
         default: false
         type: boolean
       tag:
-        description: "Release tag to build and publish (for example v0.3.2)"
+        description: "Release tag to build and publish (for example v0.3.3)"
         required: true
-        default: v0.3.2
+        default: v0.3.3
         type: string
   push:
     tags:
@@ -35,7 +35,7 @@ jobs:
           set -euo pipefail
           ref="${RELEASE_REF}"
           if [[ "$ref" != v* ]]; then
-            echo "Release ref must be a version tag such as v0.3.2; got: $ref" >&2
+            echo "Release ref must be a version tag such as v0.3.3; got: $ref" >&2
             exit 1
           fi
 
@@ -55,7 +55,7 @@ jobs:
       - name: Build distributions
         run: python -m build
 
-      - name: Verify distribution version matches release tag
+      - name: Verify distribution contents and version
         shell: bash
         run: |
           set -euo pipefail
@@ -67,8 +67,16 @@ jobs:
           from email.parser import Parser
 
           versions = set()
+          required_files = {"web/templates/index.html"}
+
           for wheel in Path("dist").glob("*.whl"):
               with zipfile.ZipFile(wheel) as zf:
+                  names = set(zf.namelist())
+                  missing = [item for item in required_files if item not in names]
+                  if missing:
+                      raise SystemExit(
+                          f"Wheel is missing required dashboard files: {missing}"
+                      )
                   metadata_name = next(
                       name for name in zf.namelist()
                       if name.endswith(".dist-info/METADATA")
@@ -80,6 +88,15 @@ jobs:
 
           for sdist in Path("dist").glob("*.tar.gz"):
               with tarfile.open(sdist, "r:gz") as tf:
+                  names = {member.name for member in tf.getmembers()}
+                  missing = [
+                      item for item in required_files
+                      if not any(name.endswith(item) for name in names)
+                  ]
+                  if missing:
+                      raise SystemExit(
+                          f"Source distribution is missing required dashboard files: {missing}"
+                      )
                   metadata_member = next(
                       member for member in tf.getmembers()
                       if member.name.endswith("/PKG-INFO")
