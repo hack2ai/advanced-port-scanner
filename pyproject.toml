@@ -4,16 +4,19 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "advanced-port-scanner"
-version = "0.1.0"
+version = "0.2.0"
 description = "Professional defensive network discovery scanner"
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
   "flask>=3.0,<4",
-  "gunicorn>=21,<24",
-  "scapy>=2.5,<3",
+  "gunicorn>=22,<24",
+  "rich>=13.7,<15",
   "tqdm>=4.66,<5",
 ]
+
+[project.optional-dependencies]
+syn = ["scapy>=2.5,<3"]
 
 [project.scripts]
 aps = "main:main"
