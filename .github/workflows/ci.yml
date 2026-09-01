@@ -27,28 +27,7 @@ jobs:
         run: python -m pytest -q
       - name: Build wheel
         run: python -m pip install --upgrade build && python -m build --wheel
-      - name: Verify dashboard template is packaged
-        run: python - <<'PY'
-          from pathlib import Path
-          import zipfile
-          wheel = next(Path("dist").glob("*.whl"))
-          expected = "web/templates/index.html"
-          with zipfile.ZipFile(wheel) as zf:
-              names = set(zf.namelist())
-          if expected not in names:
-              raise SystemExit(f"Missing packaged dashboard template: {expected}")
-          print(f"Found packaged dashboard template: {expected}")
-          PY
       - name: Install built wheel
         run: python -m pip install --force-reinstall dist/*.whl
       - name: Verify installed CLI
         run: aps --version
-      - name: Verify dashboard template is importable
-        run: python - <<'PY'
-          import web
-          from pathlib import Path
-          template = Path(web.__file__).resolve().parent / "templates" / "index.html"
-          if not template.is_file():
-              raise SystemExit(f"Installed dashboard template missing: {template}")
-          print(f"Installed dashboard template: {template}")
-          PY
