@@ -1,10 +1,11 @@
 from argparse import Namespace
+from dataclasses import replace
 
 import main
 
 
 def test_cli_rejects_range_above_configured_limit(monkeypatch):
-    monkeypatch.setattr(main.settings, "max_ports", 4)
+    monkeypatch.setattr(main, "settings", replace(main.settings, max_ports=4))
     called = False
 
     def fake_scan(*args, **kwargs):
