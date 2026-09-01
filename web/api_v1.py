@@ -165,9 +165,26 @@ def metrics():
 
     history = current_app.config["APS_HISTORY"]
     job_manager = current_app.config["APS_JOB_MANAGER"]
+    return data_response(summarize_metrics(job_manager.list(200), history.list(200, include_results=False)))
+
+
+@api_v1.get("/cve/lookup")
+@_require("view")
+def cve_lookup():
+    from scanner.cve import enrich
+
+    product = request.args.get("product", "").strip()
+    version = request.args.get("version", "").strip()
+    if not product:
+        return error_response("INVALID_PRODUCT", "product is required", 400)
+    settings = current_app.config["APS_SETTINGS"]
     return data_response(
-        summarize_metrics(
-            job_manager.list(200),
-            history.list(200, include_results=False),
+        enrich(
+            product,
+            version,
+            mode=settings.cve_mode,
+            feed_path=settings.cve_feed,
+            timeout=settings.cve_timeout,
+            base_url=settings.cve_api_url,
         )
     )
