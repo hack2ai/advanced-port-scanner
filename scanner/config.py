@@ -49,6 +49,7 @@ class Settings:
     auth_rate_window: int
     scan_rate_limit: int
     scan_rate_window: int
+    trust_proxy_headers: bool
 
 
 def load_settings() -> Settings:
@@ -73,6 +74,7 @@ def load_settings() -> Settings:
         auth_rate_window=_int("AUTH_RATE_WINDOW", 60, 10, 3600),
         scan_rate_limit=_int("SCAN_RATE_LIMIT", 10, 1, 1000),
         scan_rate_window=_int("SCAN_RATE_WINDOW", 60, 10, 3600),
+        trust_proxy_headers=_bool("TRUST_PROXY_HEADERS", False),
     )
 
 

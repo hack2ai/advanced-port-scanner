@@ -1,4 +1,6 @@
-from flask import Flask, jsonify
+from dataclasses import replace
+
+from flask import Flask, jsonify, request
 
 from scanner.security import RateLimiter, csrf_token, require_csrf
 
@@ -52,3 +54,31 @@ def test_csrf_rejects_authenticated_session_without_session_token():
 
     response = client.post("/_test-csrf-no-token", json={})
     assert response.status_code == 403
+
+
+def test_client_key_uses_remote_addr_by_default(monkeypatch):
+    import web.app as app_module
+
+    monkeypatch.setattr(
+        app_module,
+        "settings",
+        replace(app_module.settings, trust_proxy_headers=False),
+    )
+    with app_module.app.test_request_context(
+        "/", headers={"X-Forwarded-For": "198.51.100.44"}, environ_base={"REMOTE_ADDR": "127.0.0.1"}
+    ):
+        assert app_module._client_key("login") == "login:127.0.0.1"
+
+
+def test_client_key_can_use_forwarded_addr_when_explicitly_enabled(monkeypatch):
+    import web.app as app_module
+
+    monkeypatch.setattr(
+        app_module,
+        "settings",
+        replace(app_module.settings, trust_proxy_headers=True),
+    )
+    with app_module.app.test_request_context(
+        "/", headers={"X-Forwarded-For": "198.51.100.44, 10.0.0.2"}, environ_base={"REMOTE_ADDR": "127.0.0.1"}
+    ):
+        assert app_module._client_key("login") == "login:198.51.100.44"
