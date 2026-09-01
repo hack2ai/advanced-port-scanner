@@ -25,3 +25,9 @@ jobs:
         run: python -m pip install -r requirements.txt
       - name: Run tests
         run: python -m pytest -q
+      - name: Build wheel
+        run: python -m pip install --upgrade build && python -m build --wheel
+      - name: Install built wheel
+        run: python -m pip install --force-reinstall dist/*.whl
+      - name: Verify installed CLI
+        run: aps --version
