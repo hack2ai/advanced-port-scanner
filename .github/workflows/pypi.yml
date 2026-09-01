@@ -8,6 +8,11 @@ on:
         required: true
         default: false
         type: boolean
+      tag:
+        description: "Release tag to build and publish (for example v0.3.1)"
+        required: true
+        default: v0.3.1
+        type: string
   push:
     tags:
       - "v*"
@@ -16,13 +21,28 @@ permissions:
   contents: read
   id-token: write
 
+env:
+  RELEASE_REF: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref }}
+
 jobs:
   build:
     name: Build package
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout
+      - name: Validate release ref
+        shell: bash
+        run: |
+          set -euo pipefail
+          ref="${RELEASE_REF}"
+          if [[ "$ref" != v* ]]; then
+            echo "Release ref must be a version tag such as v0.3.1; got: $ref" >&2
+            exit 1
+          fi
+
+      - name: Checkout release ref
         uses: actions/checkout@v4
+        with:
+          ref: ${{ env.RELEASE_REF }}
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -48,9 +68,12 @@ jobs:
     name: Publish to PyPI
     needs: build
     if: >-
-      startsWith(github.ref, 'refs/tags/v') &&
-      ((github.event_name == 'push' && vars.PYPI_PUBLISH_ENABLED == 'true') ||
-       (github.event_name == 'workflow_dispatch' && inputs.publish == true))
+      (github.event_name == 'push' &&
+       startsWith(github.ref, 'refs/tags/v') &&
+       vars.PYPI_PUBLISH_ENABLED == 'true') ||
+      (github.event_name == 'workflow_dispatch' &&
+       inputs.publish == true &&
+       startsWith(inputs.tag, 'v'))
     runs-on: ubuntu-latest
     environment:
       name: pypi
