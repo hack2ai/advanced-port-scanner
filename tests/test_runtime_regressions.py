@@ -54,6 +54,35 @@ def test_queued_cancellation_does_not_start_runner():
         manager.close()
 
 
+def test_running_cancellation_keeps_elapsed_time():
+    manager = JobManager(max_workers=1, max_queue=0, retention=10)
+    started = threading.Event()
+    release = threading.Event()
+    try:
+        def runner(job):
+            started.set()
+            release.wait(2)
+            if job.cancel_event.is_set():
+                return
+
+        job = manager.submit("127.0.0.1", "1-1", "tcp", 1, runner)
+        assert started.wait(1)
+        time.sleep(0.02)
+        assert manager.cancel(job.job_id) is True
+        release.set()
+
+        deadline = time.monotonic() + 2
+        while job.status not in {"completed", "failed", "cancelled"} and time.monotonic() < deadline:
+            time.sleep(0.005)
+
+        snapshot = job.snapshot()
+        assert job.status == "cancelled"
+        assert snapshot["elapsed_seconds"] >= 0.02
+    finally:
+        release.set()
+        manager.close()
+
+
 def test_scan_target_bounds_in_flight_futures(monkeypatch):
     monkeypatch.setattr("scanner.scanner.get_ttl", lambda _ip: None)
     monkeypatch.setattr("scanner.scanner.tcp_connect_scan", lambda _ip, port: (port, False))
