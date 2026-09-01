@@ -2,6 +2,7 @@ import threading
 import time
 from concurrent.futures import ThreadPoolExecutor as RealThreadPoolExecutor
 
+from scanner.history import ScanHistory
 from scanner.jobs import JobManager
 from scanner.scanner import scan_target
 
@@ -79,3 +80,23 @@ def test_scan_target_bounds_in_flight_futures(monkeypatch):
 
     assert stats["submitted"] == 1000
     assert stats["max_pending"] <= 256
+
+
+def test_history_accepts_queued_cancellation_record(tmp_path):
+    history = ScanHistory(tmp_path / "scans.db")
+    history.save(
+        {
+            "job_id": "queued-cancelled",
+            "created_at": "2026-09-01T00:00:00+00:00",
+            "status": "cancelled",
+            "targets": "127.0.0.1",
+            "ports": "1-10",
+            "scan_type": "TCP",
+            "results": {},
+        }
+    )
+
+    item = history.get("queued-cancelled")
+    assert item is not None
+    assert item["started_at"] == "2026-09-01T00:00:00+00:00"
+    assert item["status"] == "cancelled"
