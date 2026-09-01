@@ -36,6 +36,7 @@ logger = setup_logging(str(ROOT / "logs"))
 history = ScanHistory(settings.scan_db, retention=settings.history_retention)
 app.config["APS_HISTORY"] = history
 job_manager = JobManager(max_workers=settings.max_concurrent_jobs, max_queue=16, retention=100)
+app.config["APS_JOB_MANAGER"] = job_manager
 auth_limiter = RateLimiter(settings.auth_rate_limit, settings.auth_rate_window)
 scan_limiter = RateLimiter(settings.scan_rate_limit, settings.scan_rate_window)
 
