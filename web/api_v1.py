@@ -1,7 +1,6 @@
 """Versioned API endpoints for the Advanced Port Scanner."""
 from __future__ import annotations
 
-from datetime import datetime, timezone
 from functools import wraps
 from typing import Any
 from uuid import uuid4
@@ -157,3 +156,18 @@ def analytics():
     history = current_app.config["APS_HISTORY"]
     items = history.list(200, include_results=True)
     return data_response(summarize_scans(items))
+
+
+@api_v1.get("/metrics")
+@_require("view")
+def metrics():
+    from scanner.metrics import summarize_metrics
+
+    history = current_app.config["APS_HISTORY"]
+    job_manager = current_app.config["APS_JOB_MANAGER"]
+    return data_response(
+        summarize_metrics(
+            job_manager.list(200),
+            history.list(200, include_results=False),
+        )
+    )
