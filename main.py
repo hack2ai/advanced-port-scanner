@@ -16,9 +16,9 @@ from scanner.config import settings
 from scanner.profiles import get_profile, list_profiles
 from scanner.scanner import scan_target
 from scanner.utils import parse_port_range, resolve_target, save_csv, save_json, save_txt, setup_logging
+from scanner.version import VERSION
 from scanner.vuln_hints import RISK_COLORS
 
-VERSION = "0.2.0"
 console = Console()
 
 
