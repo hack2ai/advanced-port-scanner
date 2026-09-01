@@ -9,9 +9,9 @@ on:
         default: false
         type: boolean
       tag:
-        description: "Release tag to build and publish (for example v0.3.1)"
+        description: "Release tag to build and publish (for example v0.3.2)"
         required: true
-        default: v0.3.1
+        default: v0.3.2
         type: string
   push:
     tags:
@@ -35,7 +35,7 @@ jobs:
           set -euo pipefail
           ref="${RELEASE_REF}"
           if [[ "$ref" != v* ]]; then
-            echo "Release ref must be a version tag such as v0.3.1; got: $ref" >&2
+            echo "Release ref must be a version tag such as v0.3.2; got: $ref" >&2
             exit 1
           fi
 
@@ -50,10 +50,59 @@ jobs:
           python-version: "3.12"
 
       - name: Install build tooling
-        run: python -m pip install --upgrade build twine
+        run: python -m pip install --upgrade build twine packaging
 
       - name: Build distributions
         run: python -m build
+
+      - name: Verify distribution version matches release tag
+        shell: bash
+        run: |
+          set -euo pipefail
+          expected="${RELEASE_REF#v}"
+          actual=$(python - <<'PY'
+          from pathlib import Path
+          import tarfile
+          import zipfile
+          from email.parser import Parser
+
+          versions = set()
+          for wheel in Path("dist").glob("*.whl"):
+              with zipfile.ZipFile(wheel) as zf:
+                  metadata_name = next(
+                      name for name in zf.namelist()
+                      if name.endswith(".dist-info/METADATA")
+                  )
+                  metadata = Parser().parsestr(
+                      zf.read(metadata_name).decode("utf-8")
+                  )
+                  versions.add(metadata["Version"])
+
+          for sdist in Path("dist").glob("*.tar.gz"):
+              with tarfile.open(sdist, "r:gz") as tf:
+                  metadata_member = next(
+                      member for member in tf.getmembers()
+                      if member.name.endswith("/PKG-INFO")
+                  )
+                  stream = tf.extractfile(metadata_member)
+                  if stream is None:
+                      raise SystemExit("Could not read PKG-INFO from sdist")
+                  metadata = Parser().parsestr(stream.read().decode("utf-8"))
+                  versions.add(metadata["Version"])
+
+          if len(versions) != 1:
+              raise SystemExit(
+                  f"Expected exactly one distribution version, found: {sorted(versions)}"
+              )
+          print(next(iter(versions)))
+          PY
+          )
+          echo "Requested tag version: $expected"
+          echo "Built distribution version: $actual"
+          if [[ "$actual" != "$expected" ]]; then
+            echo "Distribution version does not match release tag" >&2
+            exit 1
+          fi
 
       - name: Check distributions
         run: python -m twine check dist/*
