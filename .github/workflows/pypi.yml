@@ -9,9 +9,9 @@ on:
         default: false
         type: boolean
       tag:
-        description: "Release tag to build and publish (for example v0.3.3)"
+        description: "Release tag to build and publish (for example v0.3.4)"
         required: true
-        default: v0.3.3
+        default: v0.3.4
         type: string
   push:
     tags:
@@ -35,7 +35,7 @@ jobs:
           set -euo pipefail
           ref="${RELEASE_REF}"
           if [[ "$ref" != v* ]]; then
-            echo "Release ref must be a version tag such as v0.3.3; got: $ref" >&2
+            echo "Release ref must be a version tag such as v0.3.4; got: $ref" >&2
             exit 1
           fi
 
