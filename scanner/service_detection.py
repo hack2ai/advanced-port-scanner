@@ -20,7 +20,6 @@ _PATTERNS: tuple[tuple[re.Pattern[str], ServiceInfo], ...] = (
     (re.compile(r"^220[- ](?:.*?)(?:vsftpd)[ /-]?([\w.]+)?", re.I), ServiceInfo("ftp", product="vsftpd", confidence=0.94)),
     (re.compile(r"^220[- ](?:.*?)(?:FileZilla Server)[ /-]?([\w.]+)?", re.I), ServiceInfo("ftp", product="FileZilla Server", confidence=0.94)),
     (re.compile(r"^220[- ]", re.I), ServiceInfo("ftp", confidence=0.78)),
-    (re.compile(r"^HTTP/\d(?:\.\d)?\s+(\d{3})", re.I), ServiceInfo("http", confidence=0.98)),
     (re.compile(r"^\+OK(?:.*?)(?:Dovecot)[ /-]?([\w.]+)?", re.I), ServiceInfo("pop3", product="Dovecot", confidence=0.94)),
     (re.compile(r"^\* OK(?:.*?)(?:Dovecot)[ /-]?([\w.]+)?", re.I), ServiceInfo("imap", product="Dovecot", confidence=0.94)),
     (re.compile(r"^\+PONG$", re.I), ServiceInfo("redis", product="Redis", confidence=0.95)),
@@ -39,14 +38,22 @@ def identify_from_banner(banner: str, port: int | None = None) -> ServiceInfo:
     """
     text = (banner or "").strip()
     if text:
+        http_match = re.search(r"^HTTP/\d(?:\.\d)?\s+\d{3}", text, re.I | re.M)
+        if http_match:
+            server_match = re.search(r"^Server:\s*([^\r\n/]+)(?:/([\w.+-]+))?", text, re.I | re.M)
+            if server_match:
+                return ServiceInfo(
+                    "http",
+                    product=server_match.group(1).strip(),
+                    version=(server_match.group(2) or "").strip(),
+                    confidence=0.98,
+                )
+            return ServiceInfo("http", confidence=0.98)
+
         for pattern, info in _PATTERNS:
             match = pattern.search(text)
             if match:
                 return _with_version(info, match)
-
-        http_match = re.search(r"^Server:\s*([^\r\n/]+)(?:/([\w.+-]+))?", text, re.I | re.M)
-        if http_match:
-            return ServiceInfo("http", product=http_match.group(1).strip(), version=(http_match.group(2) or "").strip(), confidence=0.93)
 
     port_map = {
         21: ServiceInfo("ftp", confidence=0.72),
