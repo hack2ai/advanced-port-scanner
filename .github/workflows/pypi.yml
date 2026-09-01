@@ -1,7 +1,13 @@
-name: Publish Python package
+name: Build and publish Python package
 
 on:
   workflow_dispatch:
+    inputs:
+      publish:
+        description: "Publish to PyPI (requires a configured trusted publisher)"
+        required: true
+        default: false
+        type: boolean
   push:
     tags:
       - "v*"
@@ -41,7 +47,10 @@ jobs:
   publish:
     name: Publish to PyPI
     needs: build
-    if: startsWith(github.ref, 'refs/tags/v')
+    if: >-
+      startsWith(github.ref, 'refs/tags/v') &&
+      ((github.event_name == 'push' && vars.PYPI_PUBLISH_ENABLED == 'true') ||
+       (github.event_name == 'workflow_dispatch' && inputs.publish == true))
     runs-on: ubuntu-latest
     environment:
       name: pypi
