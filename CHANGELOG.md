@@ -2,6 +2,14 @@
 
 All notable changes to this project are documented here.
 
+## [0.2.1] - 2026-09-01
+
+### Fixed
+- Hardened Docker deployment for process-local job and rate-limit state.
+- Switched persistent Docker storage to managed volumes for SQLite data, reports, and logs.
+- Added Docker runtime regression coverage for worker topology and storage configuration.
+- Refreshed the public README and deployment documentation for the current release line.
+
 ## [0.2.0] - 2026-09-01
 
 ### Added
