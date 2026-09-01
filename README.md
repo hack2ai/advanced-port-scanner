@@ -1,12 +1,12 @@
 # Advanced Port Scanner
 
-A professional Python tool for **authorized network asset discovery**. It provides a focused CLI, a Flask dashboard/API, concurrent TCP discovery, optional lab-only SYN probing, lightweight service banners, informational risk hints, and JSON/CSV/TXT/HTML reporting.
+A professional Python tool for **authorized network asset discovery**. It provides a focused CLI, a Flask dashboard/API, concurrent TCP discovery, optional lab-only SYN probing, lightweight service banners, informational risk hints, structured scan history, analytics, and JSON/CSV/TXT/HTML reporting.
 
 > **Authorized use only.** Scan systems you own or have explicit permission to assess.
 
-## Release baseline — v0.1.0
+## Release — v0.2.0
 
-The `release-v0.1.0` branch consolidates the current professional foundation:
+The current `main` branch contains the professional v0.2.0 feature set:
 
 - Clean `scanner/` and `web/` package layout
 - Input validation and configurable resource limits
@@ -17,9 +17,12 @@ The `release-v0.1.0` branch consolidates the current professional foundation:
 - Versioned JSON reports plus CSV/TXT/HTML exports
 - Bounded asynchronous job manager with cancellation and live progress
 - Scan profiles (`quick`, `standard`, `extended`, `full`)
-- Lightweight service fingerprinting with confidence metadata
-- Health, job, history, profile, and HTML report APIs
-- Responsive dashboard with live job status and history
+- Lightweight service fingerprinting with product/version/confidence metadata
+- Health, jobs, scans, history, profiles, analytics, and HTML report APIs
+- Versioned `/api/v1` API with request IDs and normalized JSON envelopes
+- Session authentication with viewer/operator/admin roles
+- Login/scan rate limiting, CSRF protection, and security headers
+- Responsive dashboard with live jobs, history, scan details, and analytics
 - Automated pytest suite and GitHub Actions CI
 - Non-root Docker execution, dropped capabilities, and `no-new-privileges`
 - Installable Python package metadata with an `aps` console entry point
@@ -49,6 +52,9 @@ Concurrent scan engine
      └── heuristic TTL/OS indication
      │
      ├──────────────► SQLite scan history
+     │                       │
+     │                       ▼
+     │                 Analytics service
      │
      └──────────────► JSON / CSV / TXT / HTML reports
 ```
@@ -59,16 +65,20 @@ Concurrent scan engine
 advanced-port-scanner/
 ├── scanner/
 │   ├── __init__.py
+│   ├── analytics.py
+│   ├── auth.py
 │   ├── config.py
 │   ├── history.py
 │   ├── jobs.py
 │   ├── profiles.py
 │   ├── reporting.py
 │   ├── scanner.py
+│   ├── security.py
 │   ├── service_detection.py
 │   ├── utils.py
 │   └── vuln_hints.py
 ├── web/
+│   ├── api_v1.py
 │   ├── app.py
 │   └── templates/index.html
 ├── tests/
@@ -107,6 +117,7 @@ CLI help:
 
 ```bash
 aps --help
+aps --version
 ```
 
 Examples against authorized local/lab targets:
@@ -115,6 +126,7 @@ Examples against authorized local/lab targets:
 aps scan 127.0.0.1 --profile quick
 aps scan 127.0.0.1 --profile standard
 aps scan 127.0.0.1 --ports 1-1024
+aps profiles
 ```
 
 ### Dashboard
@@ -125,19 +137,24 @@ python web/app.py
 
 Open `http://127.0.0.1:5000`.
 
-Current API endpoints:
+### API v1
+
+The preferred machine-readable API is under `/api/v1`:
 
 | Method | Endpoint | Purpose |
 |---|---|---|
-| GET | `/api/health` | Health check |
-| GET | `/api/profiles` | Available scan profiles |
-| POST | `/api/scan` | Queue an authorized scan |
-| GET | `/api/status/<job_id>` | Poll a scan |
-| POST | `/api/status/<job_id>/cancel` | Request cooperative cancellation |
-| GET | `/api/jobs` | List recent jobs |
-| GET | `/api/history` | List persisted scan history |
-| GET | `/api/history/<job_id>` | Retrieve persisted scan details |
-| GET | `/api/reports/<job_id>/html` | Render a persisted HTML report |
+| GET | `/api/v1/health` | Health check |
+| GET | `/api/v1/profiles` | Available scan profiles |
+| POST | `/api/v1/scans` | Queue an authorized scan |
+| GET | `/api/v1/scans/<job_id>` | Read scan/job state |
+| POST | `/api/v1/scans/<job_id>/cancel` | Request cooperative cancellation |
+| GET | `/api/v1/jobs` | List recent jobs |
+| GET | `/api/v1/history` | List persisted scan history |
+| GET | `/api/v1/history/<job_id>` | Retrieve persisted scan details |
+| GET | `/api/v1/reports/<job_id>/html` | Render an HTML report |
+| GET | `/api/v1/analytics` | Persisted scan analytics |
+
+Legacy `/api/...` endpoints remain available for compatibility during the migration to v1.
 
 ### Docker
 
@@ -148,6 +165,18 @@ docker compose up --build
 The container runs the dashboard through Gunicorn as a non-root user. Reports, database data, and logs are intended to be persisted through the configured local volumes.
 
 SYN mode is **not** enabled by default in the container. If you deliberately need raw packets in an isolated lab, review and explicitly enable the required capability in `docker-compose.yml`.
+
+## Authentication
+
+Authentication is disabled by default for local development. For a controlled deployment, enable it through environment configuration and provide a strong secret plus a Werkzeug password hash. See [`docs/configuration.md`](docs/configuration.md).
+
+Roles are:
+
+- `viewer` — read-only access to jobs, history, analytics, and reports
+- `operator` — viewer access plus scan and cancellation operations
+- `admin` — operator access plus future administrative capabilities
+
+When authentication is enabled, protected operations also use CSRF protection and rate limiting.
 
 ## Configuration
 
@@ -160,6 +189,7 @@ Important limits include:
 - `MAX_PORTS` — default `4096`
 - scanner socket/banner timeouts
 - database and report paths
+- authentication and rate-limit settings
 
 ## Scan profiles
 
@@ -172,9 +202,11 @@ full        1-65535
 
 Profiles still pass through the configured `MAX_PORTS` limit; presets cannot bypass server resource controls.
 
-## Reports and history
+## Reports, history, and analytics
 
 Completed jobs are stored in SQLite for persistent history. Reports use one structured result model and can be rendered as JSON, CSV, TXT, or HTML. The HTML report includes scan metadata, target results, services, risk guidance, and an authorized-use notice.
+
+The analytics service calculates metrics from persisted scan results rather than placeholder values, including scan count, unique targets, open ports, high-risk findings, duration, risk distribution, and top services.
 
 Structured audit events are emitted as JSON logs for operational visibility.
 
@@ -196,16 +228,14 @@ GitHub Actions runs the configured test matrix.
 - Service fingerprinting uses lightweight protocol/banner observations and reports confidence rather than claiming certainty.
 - Banner collection is intentionally small and non-invasive.
 - TTL-based OS identification is heuristic and can be affected by routing and network devices.
-- Before exposing the web API beyond a trusted local/controlled environment, add authentication, TLS, and network access controls.
+- Before exposing the web API beyond a trusted local/controlled environment, enable authentication, TLS, and network access controls.
 - Do not add credential attacks, exploitation, stealth, or evasion functionality.
 
 ## Roadmap
 
-- [ ] Authentication and role-based authorization
-- [ ] API v1 migration with compatibility/deprecation strategy
-- [ ] Expanded analytics dashboard
-- [ ] Optional authoritative CVE enrichment
-- [ ] `pipx` release workflow
+- [ ] Authoritative CVE enrichment with explicit offline/online modes
+- [ ] `pipx`/PyPI release workflow
+- [ ] Additional multi-user administration capabilities
 
 ## License
 
