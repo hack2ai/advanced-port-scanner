@@ -52,9 +52,16 @@ class Settings:
     scan_rate_limit: int
     scan_rate_window: int
     trust_proxy_headers: bool
+    cve_mode: str
+    cve_feed: str
+    cve_timeout: float
+    cve_api_url: str
 
 
 def load_settings() -> Settings:
+    cve_mode = os.getenv("CVE_MODE", "off").strip().lower()
+    if cve_mode not in {"off", "offline", "online"}:
+        cve_mode = "off"
     return Settings(
         host=os.getenv("HOST", "127.0.0.1"),
         port=_int("PORT", 5000, 1, 65535),
@@ -79,6 +86,10 @@ def load_settings() -> Settings:
         scan_rate_limit=_int("SCAN_RATE_LIMIT", 10, 1, 1000),
         scan_rate_window=_int("SCAN_RATE_WINDOW", 60, 10, 3600),
         trust_proxy_headers=_bool("TRUST_PROXY_HEADERS", False),
+        cve_mode=cve_mode,
+        cve_feed=os.getenv("CVE_FEED", "data/cve_feed.json"),
+        cve_timeout=_float("CVE_TIMEOUT", 5.0, 0.5, 30.0),
+        cve_api_url=os.getenv("CVE_API_URL", "https://services.nvd.nist.gov/rest/json/cves/2.0"),
     )
 
 
