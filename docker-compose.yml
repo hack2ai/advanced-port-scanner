@@ -5,9 +5,9 @@ services:
     ports:
       - "5000:5000"
     volumes:
-      - ./data:/app/data
-      - ./reports:/app/reports
-      - ./logs:/app/logs
+      - scanner_data:/app/data
+      - scanner_reports:/app/reports
+      - scanner_logs:/app/logs
     environment:
       HOST: 0.0.0.0
       PORT: 5000
@@ -24,3 +24,8 @@ services:
     # Enable only in an isolated lab if SYN mode is explicitly required:
     # cap_add:
     #   - NET_RAW
+
+volumes:
+  scanner_data:
+  scanner_reports:
+  scanner_logs:
