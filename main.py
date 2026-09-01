@@ -80,6 +80,13 @@ def run_scan(args: argparse.Namespace) -> int:
 
     logger = setup_logging()
     raw_targets = list(dict.fromkeys(t.strip() for t in args.targets.split(",") if t.strip()))
+    if len(raw_targets) > settings.max_targets:
+        console.print(
+            f"[bold red]Too many targets:[/bold red] {len(raw_targets)} targets requested, "
+            f"MAX_TARGETS={settings.max_targets}. Reduce the target list or raise MAX_TARGETS explicitly."
+        )
+        return 2
+
     resolved: dict[str, str] = {}
     for target in raw_targets:
         ip = resolve_target(target, logger)
