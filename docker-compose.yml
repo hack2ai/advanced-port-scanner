@@ -5,6 +5,7 @@ services:
     ports:
       - "5000:5000"
     volumes:
+      - ./data:/app/data
       - ./reports:/app/reports
       - ./logs:/app/logs
     environment:
@@ -13,6 +14,8 @@ services:
       MAX_CONCURRENT_JOBS: 2
       MAX_TARGETS: 16
       MAX_PORTS: 4096
+      HISTORY_RETENTION: 100
+      REPORT_RETENTION: 100
     restart: unless-stopped
     security_opt:
       - no-new-privileges:true
