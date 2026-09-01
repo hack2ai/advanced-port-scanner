@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "advanced-port-scanner"
-version = "0.3.2"
+version = "0.3.3"
 description = "Professional defensive network discovery scanner"
 readme = "README.md"
 requires-python = ">=3.11"
@@ -24,6 +24,9 @@ aps = "main:main"
 [tool.setuptools]
 packages = ["scanner", "web"]
 py-modules = ["main"]
+
+[tool.setuptools.package-data]
+web = ["templates/*.html"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
