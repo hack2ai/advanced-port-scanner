@@ -2,7 +2,7 @@
 
 <p align="center">
   <strong>Professional defensive network discovery for authorized security testing.</strong><br>
-  Fast local CLI • Flask dashboard • Versioned API • Persistent history • Reports • Analytics
+  Fast local CLI • Flask dashboard • Versioned API • Persistent history • Reports • Analytics • Operational metrics
 </p>
 
 <p align="center">
@@ -18,13 +18,13 @@
 
 Advanced Port Scanner is a Python-based network discovery platform designed for controlled, authorized security assessment. It combines a focused command-line interface with a Flask dashboard and versioned REST API.
 
-The project is built around predictable resource controls, persistent scan history, cooperative job cancellation, structured reporting, and security-conscious deployment defaults.
+The project is built around predictable resource controls, persistent scan history, cooperative job cancellation, structured reporting, operational metrics, and security-conscious deployment defaults.
 
 ## Why this project
 
 - **One scanner, multiple interfaces** — use the CLI for focused work or the dashboard/API for repeatable operations.
 - **Bounded by design** — target, port, concurrency, timeout, queue, and retention limits keep workloads predictable.
-- **Operationally useful** — scans persist to SQLite, exports can be generated as JSON/CSV/TXT/HTML, and analytics are derived from stored results.
+- **Operationally useful** — scans persist to SQLite, exports can be generated as JSON/CSV/TXT/HTML, analytics are derived from stored results, and operational metrics expose current workload and historical outcomes.
 - **Security-aware** — authentication, RBAC, CSRF protection, rate limiting, security headers, non-root containers, and dropped Linux capabilities are included.
 - **Transparent results** — service and risk metadata are presented as observations and guidance, not as proof of vulnerabilities.
 
@@ -50,7 +50,7 @@ The project is built around predictable resource controls, persistent scan histo
 - Persistent history for completed, failed, and cancelled jobs
 - Configurable history retention
 
-### Reporting & analytics
+### Reporting, analytics & metrics
 
 - Versioned JSON report model
 - CSV and TXT exports
@@ -58,6 +58,7 @@ The project is built around predictable resource controls, persistent scan histo
 - Persistent scan history in SQLite
 - Configurable report retention
 - Analytics for scan volume, unique targets, open ports, high-risk findings, duration, risk distribution, and top services
+- Operational metrics for active/queued/running jobs, retained history, completed/failed/cancelled scans, average duration, and total open ports
 
 ### Web & API
 
@@ -111,7 +112,13 @@ The project is built around predictable resource controls, persistent scan histo
         ┌─────────────────┐          ┌─────────────────┐
         │ SQLite history  │          │ JSON/CSV/TXT/   │
         │ + analytics     │          │ HTML reports    │
-        └─────────────────┘          └─────────────────┘
+        └────────┬────────┘          └─────────────────┘
+                 │
+                 ▼
+        ┌─────────────────┐
+        │ Operational     │
+        │ metrics         │
+        └─────────────────┘
 ```
 
 ## Project layout
@@ -124,6 +131,7 @@ advanced-port-scanner/
 │   ├── config.py
 │   ├── history.py
 │   ├── jobs.py
+│   ├── metrics.py
 │   ├── profiles.py
 │   ├── reporting.py
 │   ├── retention.py
@@ -264,6 +272,26 @@ The preferred machine-readable interface is `/api/v1`.
 | `GET` | `/api/v1/history/<job_id>` | Read stored scan details |
 | `GET` | `/api/v1/reports/<job_id>/html` | Render an HTML report |
 | `GET` | `/api/v1/analytics` | Read persisted analytics |
+| `GET` | `/api/v1/metrics` | Read operational metrics |
+
+The metrics response currently includes:
+
+```json
+{
+  "data": {
+    "active_jobs": 0,
+    "queued_jobs": 0,
+    "running_jobs": 0,
+    "retained_history": 0,
+    "completed_scans": 0,
+    "failed_scans": 0,
+    "cancelled_scans": 0,
+    "average_duration_seconds": 0.0,
+    "total_open_ports": 0
+  },
+  "request_id": "..."
+}
+```
 
 Successful JSON responses use a request-aware envelope:
 
@@ -361,6 +389,7 @@ Additional protections include CSRF validation, login/scan rate limiting, respon
 - Service fingerprinting is heuristic and reports confidence rather than certainty.
 - TTL/OS identification is heuristic and can be influenced by routing devices.
 - Banner collection is intentionally lightweight.
+- Operational metrics are derived from process-local jobs and retained history, not a long-term telemetry system.
 - Before exposing the dashboard/API outside a trusted environment, use authentication, TLS, and network access controls.
 
 ## Reports & history
@@ -401,6 +430,7 @@ When changing API or deployment behavior, add or update regression coverage in `
 
 ## Roadmap
 
+- [ ] Metrics dashboard visualization and historical time-series storage
 - [ ] Authoritative CVE enrichment with explicit offline/online modes
 - [ ] PyPI / `pipx` release workflow
 - [ ] Expanded multi-user administration
