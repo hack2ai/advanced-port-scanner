@@ -2,6 +2,18 @@
 
 All notable changes to this project are documented here.
 
+## [0.3.0] - 2026-09-01
+
+### Added
+- Operational metrics API and dashboard metrics panel for active, completed, failed, and cancelled jobs.
+- Secure tag-driven Python package release workflow with PEP 517 builds and PyPI OIDC publishing.
+- Source-aware CVE enrichment with explicit `off`, `offline`, and `online` modes.
+- Operator-supplied offline CVE feed support and authenticated `/api/v1/cve/lookup` endpoint.
+
+### Security
+- Kept CVE enrichment separate from heuristic port-risk hints so open ports are never presented as proof of vulnerability.
+- Made online CVE lookups explicitly opt-in and non-critical to scan execution.
+
 ## [0.2.1] - 2026-09-01
 
 ### Fixed
