@@ -13,7 +13,7 @@ def test_html_report_escapes_untrusted_fields(tmp_path: Path):
             "total_open": 1,
             "report_title": "Report <x>",
             "targets": {
-                "127.0.0.1"><script>": {
+                '127.0.0.1"><script>': {
                     "ip": "127.0.0.1",
                     "open_ports": [
                         {
