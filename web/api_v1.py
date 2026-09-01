@@ -20,14 +20,18 @@ def request_id() -> str:
 
 
 def data_response(data: Any, status: int = 200):
-    response = jsonify({"data": data, "request_id": request_id()})
+    rid = request_id()
+    response = jsonify({"data": data, "request_id": rid})
     response.status_code = status
+    response.headers["X-Request-ID"] = rid
     return response
 
 
 def error_response(code: str, message: str, status: int):
-    response = jsonify({"error": {"code": code, "message": message}, "request_id": request_id()})
+    rid = request_id()
+    response = jsonify({"error": {"code": code, "message": message}, "request_id": rid})
     response.status_code = status
+    response.headers["X-Request-ID"] = rid
     return response
 
 
