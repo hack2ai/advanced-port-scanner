@@ -48,7 +48,6 @@ def load_offline_feed(path: str | Path) -> list[dict[str, Any]]:
 
 def lookup_offline(product: str, version: str, feed: Iterable[dict[str, Any]]) -> list[CVERecord]:
     product_key = product.strip().lower()
-    version_key = version.strip().lower()
     matches: list[CVERecord] = []
     for row in feed:
         if not isinstance(row, dict):
@@ -124,3 +123,21 @@ def lookup_nvd(product: str, version: str, *, timeout: float = 5.0, base_url: st
                 )
             )
     return records
+
+
+def enrich(product: str, version: str, *, mode: str = "off", feed_path: str | Path = "data/cve_feed.json", timeout: float = 5.0, base_url: str = "https://services.nvd.nist.gov/rest/json/cves/2.0") -> dict[str, Any]:
+    """Return source-aware CVE enrichment without making it scan-critical."""
+    normalized = mode.strip().lower()
+    if normalized not in {"off", "offline", "online"}:
+        normalized = "off"
+    records: list[CVERecord] = []
+    if normalized == "offline":
+        records = lookup_offline(product, version, load_offline_feed(feed_path))
+    elif normalized == "online":
+        records = lookup_nvd(product, version, timeout=timeout, base_url=base_url)
+    return {
+        "mode": normalized,
+        "product": product.strip(),
+        "version": version.strip(),
+        "matches": [record.as_dict() for record in records],
+    }
