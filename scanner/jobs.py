@@ -32,16 +32,15 @@ class ScanJob:
     total_open: int = 0
     results: dict[str, Any] = field(default_factory=dict)
     error: str | None = None
+    elapsed_seconds: float = 0.0
     cancel_event: threading.Event = field(default_factory=threading.Event, repr=False)
     future: Future[Any] | None = field(default=None, repr=False)
     started_monotonic: float | None = field(default=None, repr=False)
 
     def snapshot(self, include_results: bool = True) -> dict[str, Any]:
-        elapsed = 0.0
-        if self.started_monotonic is not None:
+        elapsed = self.elapsed_seconds
+        if self.started_monotonic is not None and self.status not in TERMINAL_STATES:
             elapsed = round(max(0.0, time.monotonic() - self.started_monotonic), 2)
-        elif self.started_at and self.finished_at:
-            elapsed = 0.0
         percent = round((self.completed_work / self.total_work) * 100, 2) if self.total_work else 0.0
         item = {
             "job_id": self.job_id,
@@ -100,11 +99,17 @@ class JobManager:
             job.future = self._executor.submit(self._run, job, runner)
             return job
 
+    def _finish_locked(self, job: ScanJob) -> None:
+        if job.started_monotonic is not None:
+            job.elapsed_seconds = round(max(0.0, time.monotonic() - job.started_monotonic), 2)
+        if job.finished_at is None:
+            job.finished_at = _utc_now()
+
     def _run(self, job: ScanJob, runner: Callable[[ScanJob], None]) -> None:
         with self._lock:
             if job.cancel_event.is_set():
                 job.status = "cancelled"
-                job.finished_at = _utc_now()
+                self._finish_locked(job)
                 return
             job.status = "running"
             job.started_at = _utc_now()
@@ -116,12 +121,12 @@ class JobManager:
                     job.status = "cancelled"
                 elif job.status not in TERMINAL_STATES:
                     job.status = "completed"
-                job.finished_at = _utc_now()
+                self._finish_locked(job)
         except Exception:
             with self._lock:
                 job.status = "failed"
                 job.error = "Internal scan error"
-                job.finished_at = _utc_now()
+                self._finish_locked(job)
         finally:
             with self._lock:
                 self._prune_locked()
@@ -143,7 +148,7 @@ class JobManager:
             job.cancel_event.set()
             if job.status == "queued":
                 job.status = "cancelled"
-                job.finished_at = _utc_now()
+                self._finish_locked(job)
                 if job.future is not None:
                     job.future.cancel()
             return True
