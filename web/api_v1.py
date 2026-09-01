@@ -59,6 +59,18 @@ def _require(action: str):
     return decorator
 
 
+def _forward_result(result: Any, error_code: str):
+    """Adapt a Flask view result without mistaking successful tuples for errors."""
+    if isinstance(result, tuple):
+        body, status = result
+        payload = body.get_json() if hasattr(body, "get_json") else {}
+        if status >= 400 or "error" in payload:
+            message = payload.get("error", "Request failed")
+            return error_response(error_code, message, status)
+        return data_response(payload, status)
+    return data_response(result.get_json(), result.status_code)
+
+
 @api_v1.after_request
 def add_request_id(response):
     response.headers["X-Request-ID"] = request_id()
@@ -81,11 +93,7 @@ def profiles():
 @_require("scan")
 def create_scan():
     result = current_app.view_functions["start_scan"]()
-    if isinstance(result, tuple):
-        body, status = result
-        payload = body.get_json() if hasattr(body, "get_json") else {}
-        return error_response("SCAN_REQUEST_FAILED", payload.get("error", "Request failed"), status)
-    return data_response(result.get_json(), result.status_code)
+    return _forward_result(result, "SCAN_REQUEST_FAILED")
 
 
 @api_v1.get("/scans/<job_id>")
@@ -103,11 +111,7 @@ def get_scan(job_id: str):
 @_require("cancel")
 def cancel_scan(job_id: str):
     result = current_app.view_functions["cancel"](job_id)
-    if isinstance(result, tuple):
-        body, status = result
-        payload = body.get_json() if hasattr(body, "get_json") else {}
-        return error_response("SCAN_CANCEL_FAILED", payload.get("error", "Unable to cancel scan"), status)
-    return data_response(result.get_json(), result.status_code)
+    return _forward_result(result, "SCAN_CANCEL_FAILED")
 
 
 @api_v1.get("/jobs")
