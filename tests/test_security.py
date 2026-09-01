@@ -1,6 +1,6 @@
-import importlib
+from flask import Flask, jsonify
 
-from scanner.security import RateLimiter, csrf_token, require_csrf
+from scanner.security import RateLimiter, require_csrf
 
 
 def test_rate_limiter_blocks_after_limit():
@@ -20,15 +20,14 @@ def test_security_headers_present():
 
 
 def test_csrf_token_requires_authenticated_session_for_json_mutation():
-    from flask import jsonify
-
-    from web.app import app
-
     protected = require_csrf(lambda: jsonify({"ok": True}))
     protected.__name__ = "protected"
-    app.add_url_rule("/_test-csrf", view_func=protected, methods=["POST"])
 
-    client = app.test_client()
+    test_app = Flask(__name__)
+    test_app.secret_key = "test-secret"
+    test_app.add_url_rule("/_test-csrf", view_func=protected, methods=["POST"])
+
+    client = test_app.test_client()
     with client.session_transaction() as sess:
         sess["username"] = "tester"
         sess["csrf_token"] = "expected-token"
