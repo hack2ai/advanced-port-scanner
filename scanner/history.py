@@ -1,9 +1,11 @@
 """SQLite-backed persistence for completed scan jobs."""
 from __future__ import annotations
+
 import json
 import sqlite3
 from pathlib import Path
 from typing import Any
+
 
 class ScanHistory:
     def __init__(self, db_path: str | Path) -> None:
@@ -26,13 +28,23 @@ class ScanHistory:
             conn.execute("CREATE INDEX IF NOT EXISTS idx_scans_started_at ON scans(started_at)")
 
     def save(self, job: dict[str, Any]) -> None:
+        started_at = job.get("started_at") or job.get("created_at")
+        if not started_at:
+            raise ValueError("History records require started_at or created_at")
         with self._connect() as conn:
             conn.execute("""INSERT OR REPLACE INTO scans
                 (job_id, started_at, duration, status, targets, ports, scan_type, total_open, results_json)
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""", (
-                job["job_id"], job["started_at"], job.get("duration"), job["status"],
-                job["targets"], job["ports"], job["scan_type"], job.get("total_open", 0),
-                json.dumps(job.get("results", {})),))
+                job["job_id"],
+                started_at,
+                job.get("duration"),
+                job["status"],
+                job["targets"],
+                job["ports"],
+                job["scan_type"],
+                job.get("total_open", 0),
+                json.dumps(job.get("results", {})),
+            ))
 
     def list(self, limit: int = 50, include_results: bool = False) -> list[dict[str, Any]]:
         limit = max(1, min(int(limit), 200))
@@ -46,9 +58,16 @@ class ScanHistory:
         return self._row(row, True) if row else None
 
     def _row(self, row: sqlite3.Row, include_results: bool) -> dict[str, Any]:
-        item = {"job_id": row["job_id"], "started_at": row["started_at"], "duration": row["duration"],
-                "status": row["status"], "targets": row["targets"], "ports": row["ports"],
-                "scan_type": row["scan_type"], "total_open": row["total_open"]}
+        item = {
+            "job_id": row["job_id"],
+            "started_at": row["started_at"],
+            "duration": row["duration"],
+            "status": row["status"],
+            "targets": row["targets"],
+            "ports": row["ports"],
+            "scan_type": row["scan_type"],
+            "total_open": row["total_open"],
+        }
         if include_results:
             item["results"] = json.loads(row["results_json"])
         return item

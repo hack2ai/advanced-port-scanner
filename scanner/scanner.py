@@ -109,46 +109,55 @@ def scan_target(
     scan_fn = syn_scan_port if scan_type == "syn" else tcp_connect_scan
     open_list: list[dict] = []
     workers = min(64, max(1, len(ports)))
+    batch_size = max(workers * 4, workers)
     completed = 0
+    pool = concurrent.futures.ThreadPoolExecutor(max_workers=workers)
 
     if logger:
         audit(logger, "scan_started", address=ip, scan_type=scan_type, port_start=start_port, port_end=end_port)
 
-    with concurrent.futures.ThreadPoolExecutor(max_workers=workers) as pool:
-        futures = [pool.submit(scan_fn, ip, port) for port in ports]
-        try:
-            with tqdm(total=len(ports), desc=f"  {ip}", unit="port", ncols=72, disable=bool(progress_callback)) as pbar:
-                for future in concurrent.futures.as_completed(futures):
-                    port, is_open = future.result()
-                    completed += 1
-                    pbar.update(1)
-                    if progress_callback:
-                        progress_callback(completed, len(ports))
-                    if cancel_event is not None and cancel_event.is_set():
-                        for pending in futures:
-                            pending.cancel()
-                        raise InterruptedError("Scan cancelled")
-                    if not is_open:
-                        continue
-                    hints = VULNERABILITY_HINTS.get(port, {})
-                    banner = grab_banner(ip, port) if grab_banners else ""
-                    info = identify_from_banner(banner, port)
-                    entry = {
-                        "port": port,
-                        "service": hints.get("service") or info.service or get_service_name(port),
-                        "protocol": info.protocol,
-                        "product": info.product,
-                        "version": info.version,
-                        "confidence": info.confidence,
-                        "banner": banner,
-                        "risk": hints.get("risk", "INFO"),
-                        "vuln_hint": hints.get("hint", ""),
-                    }
-                    open_list.append(entry)
-                    if logger:
-                        audit(logger, "port_open", address=ip, port=port, service=entry["service"], risk=entry["risk"])
-        except InterruptedError:
-            raise
+    try:
+        with tqdm(total=len(ports), desc=f"  {ip}", unit="port", ncols=72, disable=bool(progress_callback)) as pbar:
+            for offset in range(0, len(ports), batch_size):
+                if cancel_event is not None and cancel_event.is_set():
+                    raise InterruptedError("Scan cancelled")
+                batch = ports[offset: offset + batch_size]
+                futures = [pool.submit(scan_fn, ip, port) for port in batch]
+                try:
+                    for future in concurrent.futures.as_completed(futures):
+                        if cancel_event is not None and cancel_event.is_set():
+                            for pending in futures:
+                                pending.cancel()
+                            raise InterruptedError("Scan cancelled")
+                        port, is_open = future.result()
+                        completed += 1
+                        pbar.update(1)
+                        if progress_callback:
+                            progress_callback(completed, len(ports))
+                        if not is_open:
+                            continue
+                        hints = VULNERABILITY_HINTS.get(port, {})
+                        banner = grab_banner(ip, port) if grab_banners else ""
+                        info = identify_from_banner(banner, port)
+                        entry = {
+                            "port": port,
+                            "service": hints.get("service") or info.service or get_service_name(port),
+                            "protocol": info.protocol,
+                            "product": info.product,
+                            "version": info.version,
+                            "confidence": info.confidence,
+                            "banner": banner,
+                            "risk": hints.get("risk", "INFO"),
+                            "vuln_hint": hints.get("hint", ""),
+                        }
+                        open_list.append(entry)
+                        if logger:
+                            audit(logger, "port_open", address=ip, port=port, service=entry["service"], risk=entry["risk"])
+                finally:
+                    for future in futures:
+                        future.cancel()
+    finally:
+        pool.shutdown(wait=True, cancel_futures=True)
 
     open_list.sort(key=lambda x: x["port"])
     ttl = get_ttl(ip)

@@ -180,45 +180,79 @@ def start_scan():
     total_work = len(targets) * (end_port - start_port + 1)
 
     def runner(job: ScanJob) -> None:
-        completed_offset = 0
-        for target in targets:
-            if job.cancel_event.is_set():
-                job.status = "cancelled"
-                job.finished_at = _utc_now()
-                history.save(job.snapshot(include_results=True))
-                return
-            job.current_target = target
-            ip = resolve_target(target, logger)
-            if not ip:
-                result = {"ip": None, "open_ports": [], "os_guess": "Unknown", "ttl": None, "error": "Target could not be resolved"}
+        try:
+            completed_offset = 0
+            for target in targets:
+                if job.cancel_event.is_set():
+                    elapsed = round(max(0.0, time.monotonic() - (job.started_monotonic or time.monotonic())), 2)
+                    job.elapsed_seconds = elapsed
+                    job.status = "cancelled"
+                    job.finished_at = _utc_now()
+                    history.save(job.snapshot(include_results=True) | {"duration": elapsed})
+                    return
+                job.current_target = target
+                ip = resolve_target(target, logger)
+                if not ip:
+                    result = {"ip": None, "open_ports": [], "os_guess": "Unknown", "ttl": None, "error": "Target could not be resolved"}
+                    completed_offset += end_port - start_port + 1
+                    job_manager.update_progress(job, completed=completed_offset, current_target=target, result_target=target, result=result)
+                    continue
+
+                def progress(done: int, total: int) -> None:
+                    job_manager.update_progress(job, completed=completed_offset + done, current_target=target)
+
+                try:
+                    result = scan_target(ip, start_port, end_port, scan_type, grab_banner, logger, progress_callback=progress, cancel_event=job.cancel_event)
+                except InterruptedError:
+                    elapsed = round(max(0.0, time.monotonic() - (job.started_monotonic or time.monotonic())), 2)
+                    job.elapsed_seconds = elapsed
+                    job.status = "cancelled"
+                    job.finished_at = _utc_now()
+                    history.save(job.snapshot(include_results=True) | {"duration": elapsed})
+                    audit(logger, "scan_cancelled", job_id=job.job_id)
+                    return
                 completed_offset += end_port - start_port + 1
-                job_manager.update_progress(job, completed=completed_offset, current_target=target, result_target=target, result=result)
-                continue
-            def progress(done: int, total: int) -> None:
-                job_manager.update_progress(job, completed=completed_offset + done, current_target=target)
-            try:
-                result = scan_target(ip, start_port, end_port, scan_type, grab_banner, logger, progress_callback=progress, cancel_event=job.cancel_event)
-            except InterruptedError:
-                job.status = "cancelled"
-                job.finished_at = _utc_now()
-                history.save(job.snapshot(include_results=True))
-                audit(logger, "scan_cancelled", job_id=job.job_id)
-                return
-            completed_offset += end_port - start_port + 1
-            job_manager.update_progress(job, completed=completed_offset, current_target=target, total_open=job.total_open + len(result.get("open_ports", [])), result_target=target, result=result)
-        elapsed = round(max(0.0, time.monotonic() - (job.started_monotonic or time.monotonic())), 2)
-        payload = {"schema_version": "1.0", "scan_time": job.started_at or job.created_at, "duration": f"{elapsed}s", "scan_type": job.scan_type, "profile": profile_name, "port_range": job.ports, "total_open": job.total_open, "targets": job.results}
-        job.status = "completed"
-        job.finished_at = _utc_now()
-        history.save(job.snapshot(include_results=True) | {"duration": elapsed})
-        report_dir = ROOT / settings.reports_dir
-        report_dir.mkdir(exist_ok=True)
-        timestamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
-        save_json(payload, str(report_dir / f"scan_{timestamp}_{job.job_id}.json"))
-        save_csv(payload, str(report_dir / f"scan_{timestamp}_{job.job_id}.csv"))
-        save_txt(payload, str(report_dir / f"scan_{timestamp}_{job.job_id}.txt"))
-        html_path = report_dir / f"scan_{timestamp}_{job.job_id}.html"
-        html_path.write_text(render_html_report(payload), encoding="utf-8")
+                job_manager.update_progress(
+                    job,
+                    completed=completed_offset,
+                    current_target=target,
+                    total_open=job.total_open + len(result.get("open_ports", [])),
+                    result_target=target,
+                    result=result,
+                )
+
+            elapsed = round(max(0.0, time.monotonic() - (job.started_monotonic or time.monotonic())), 2)
+            payload = {
+                "schema_version": "1.0",
+                "scan_time": job.started_at or job.created_at,
+                "duration": f"{elapsed}s",
+                "scan_type": job.scan_type,
+                "profile": profile_name,
+                "port_range": job.ports,
+                "total_open": job.total_open,
+                "targets": job.results,
+            }
+            job.status = "completed"
+            job.finished_at = _utc_now()
+            history.save(job.snapshot(include_results=True) | {"duration": elapsed})
+            report_dir = ROOT / settings.reports_dir
+            report_dir.mkdir(exist_ok=True)
+            timestamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
+            save_json(payload, str(report_dir / f"scan_{timestamp}_{job.job_id}.json"))
+            save_csv(payload, str(report_dir / f"scan_{timestamp}_{job.job_id}.csv"))
+            save_txt(payload, str(report_dir / f"scan_{timestamp}_{job.job_id}.txt"))
+            html_path = report_dir / f"scan_{timestamp}_{job.job_id}.html"
+            html_path.write_text(render_html_report(payload), encoding="utf-8")
+        except Exception:
+            elapsed = round(max(0.0, time.monotonic() - (job.started_monotonic or time.monotonic())), 2)
+            job.status = "failed"
+            job.error = "Scan failed; inspect server logs for details"
+            job.elapsed_seconds = elapsed
+            job.finished_at = _utc_now()
+            history.save(job.snapshot(include_results=True) | {"duration": elapsed})
+            audit(logger, "scan_failed", job_id=job.job_id)
+            raise
+
     try:
         job = job_manager.submit(targets_raw, f"{start_port}-{end_port}", scan_type, total_work, runner)
     except RuntimeError as exc:
@@ -247,6 +281,8 @@ def cancel(job_id: str):
         return jsonify({"error": "Job is already finished"}), 409
     audit(logger, "scan_cancel_requested", job_id=job_id, username=session.get("username"))
     job = job_manager.get(job_id)
+    if job is not None and job.status == "cancelled":
+        history.save(job.snapshot(include_results=True) | {"duration": job.elapsed_seconds})
     return jsonify(job.snapshot(include_results=True))
 
 
