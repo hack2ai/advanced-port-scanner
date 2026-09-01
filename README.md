@@ -2,14 +2,14 @@
 
 <p align="center">
   <strong>Professional defensive network discovery for authorized security testing.</strong><br>
-  Fast local CLI • Flask dashboard • Versioned API • Persistent history • Reports • Analytics • Operational metrics
+  Fast local CLI • Flask dashboard • Versioned API • Persistent history • Reports • Analytics • Operational metrics • Controlled CVE enrichment
 </p>
 
 <p align="center">
   <a href="https://github.com/hack2ai/advanced-port-scanner/actions/workflows/ci.yml"><img src="https://github.com/hack2ai/advanced-port-scanner/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
   <a href="https://github.com/hack2ai/advanced-port-scanner/blob/main/LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue.svg" alt="MIT License"></a>
   <img src="https://img.shields.io/badge/python-3.11%2B-blue.svg" alt="Python 3.11+">
-  <img src="https://img.shields.io/badge/release-0.2.1-informational.svg" alt="v0.2.1">
+  <img src="https://img.shields.io/badge/release-0.3.0-informational.svg" alt="v0.3.0">
 </p>
 
 > **Authorized use only.** Scan systems you own or have explicit permission to assess.
@@ -18,7 +18,7 @@
 
 Advanced Port Scanner is a Python-based network discovery platform designed for controlled, authorized security assessment. It combines a focused command-line interface with a Flask dashboard and versioned REST API.
 
-The project is built around predictable resource controls, persistent scan history, cooperative job cancellation, structured reporting, operational metrics, and security-conscious deployment defaults.
+The project is built around predictable resource controls, persistent scan history, cooperative job cancellation, structured reporting, operational metrics, controlled CVE enrichment, and security-conscious deployment defaults.
 
 ## Why this project
 
@@ -60,6 +60,15 @@ The project is built around predictable resource controls, persistent scan histo
 - Analytics for scan volume, unique targets, open ports, high-risk findings, duration, risk distribution, and top services
 - Operational metrics for active/queued/running jobs, retained history, completed/failed/cancelled scans, average duration, and total open ports
 
+### CVE enrichment
+
+- Separate from heuristic port-risk hints
+- Explicit modes: `off`, `offline`, and `online`
+- Operator-supplied offline JSON feeds
+- Optional NVD API lookup in online mode
+- Source-aware CVE records with severity, score, summary, and URL metadata
+- Enrichment failures are non-critical to scan execution
+
 ### Web & API
 
 - Responsive Flask dashboard
@@ -71,7 +80,7 @@ The project is built around predictable resource controls, persistent scan histo
 - Security response headers
 - Trusted-proxy support only when explicitly enabled
 
-### Deployment
+### Deployment & distribution
 
 - Installable Python package with an `aps` console command
 - Gunicorn-compatible web deployment
@@ -79,6 +88,7 @@ The project is built around predictable resource controls, persistent scan histo
 - `no-new-privileges` and dropped capabilities in Compose
 - Persistent Docker storage for SQLite data, reports, and logs
 - CI across Python 3.11, 3.12, and 3.13
+- Tag-driven PyPI publishing workflow using GitHub OIDC trusted publishing
 
 ## Architecture
 
@@ -117,7 +127,8 @@ The project is built around predictable resource controls, persistent scan histo
                  ▼
         ┌─────────────────┐
         │ Operational     │
-        │ metrics         │
+        │ metrics + CVE   │
+        │ enrichment      │
         └─────────────────┘
 ```
 
@@ -129,6 +140,7 @@ advanced-port-scanner/
 │   ├── analytics.py
 │   ├── auth.py
 │   ├── config.py
+│   ├── cve.py
 │   ├── history.py
 │   ├── jobs.py
 │   ├── metrics.py
@@ -147,12 +159,12 @@ advanced-port-scanner/
 │   └── templates/
 ├── tests/
 ├── docs/
-│   ├── configuration.md
-│   └── installation.md
 ├── data/
 ├── reports/
 ├── logs/
-├── .github/workflows/ci.yml
+├── .github/workflows/
+│   ├── ci.yml
+│   └── pypi.yml
 ├── Dockerfile
 ├── docker-compose.yml
 ├── main.py
@@ -273,6 +285,7 @@ The preferred machine-readable interface is `/api/v1`.
 | `GET` | `/api/v1/reports/<job_id>/html` | Render an HTML report |
 | `GET` | `/api/v1/analytics` | Read persisted analytics |
 | `GET` | `/api/v1/metrics` | Read operational metrics |
+| `GET` | `/api/v1/cve/lookup` | Lookup CVE enrichment for an observed product/version |
 
 The metrics response currently includes:
 
@@ -292,6 +305,14 @@ The metrics response currently includes:
   "request_id": "..."
 }
 ```
+
+CVE lookup example:
+
+```text
+GET /api/v1/cve/lookup?product=OpenSSH&version=9.8
+```
+
+CVE enrichment is controlled by the configured mode and is `off` by default.
 
 Successful JSON responses use a request-aware envelope:
 
@@ -347,8 +368,12 @@ Key controls include:
 | `AUTH_ENABLED` | `false` | Enable session authentication |
 | `SECURE_COOKIES` | `false` | Mark cookies Secure |
 | `TRUST_PROXY_HEADERS` | `false` | Trust `X-Forwarded-For` when behind a configured proxy |
+| `CVE_MODE` | `off` | CVE enrichment mode: `off`, `offline`, or `online` |
+| `CVE_FEED` | empty | Operator-supplied offline CVE JSON feed |
+| `CVE_TIMEOUT` | `5.0` | Online CVE request timeout |
+| `CVE_API_URL` | NVD v2 API | Online CVE provider endpoint |
 
-See [`docs/configuration.md`](docs/configuration.md) for authentication, password hashing, rate limits, and deployment guidance.
+See [`docs/configuration.md`](docs/configuration.md) for authentication, password hashing, rate limits, CVE enrichment, and deployment guidance.
 
 ## Docker
 
@@ -370,13 +395,32 @@ The container intentionally uses one Gunicorn worker with multiple threads becau
 
 For authorized lab environments that require SYN mode, review the commented capability configuration in `docker-compose.yml` and enable it deliberately.
 
+## CVE enrichment
+
+CVE enrichment is intentionally separate from the scanner's heuristic risk hints. A reachable port is not a CVE finding.
+
+Modes:
+
+- **off** — no external or local CVE lookup
+- **offline** — search an operator-supplied JSON feed
+- **online** — query the configured NVD API endpoint
+
+Example environment configuration:
+
+```bash
+export CVE_MODE=offline
+export CVE_FEED=data/cve-feed.json
+```
+
+The online mode must be explicitly enabled. Network errors return an empty enrichment result rather than causing an otherwise valid scan to fail.
+
 ## Security model
 
 Authentication is disabled by default for local development. For controlled deployments, enable authentication and configure a strong secret, credentials, and appropriate cookie settings.
 
 Roles:
 
-- **viewer** — read-only access to jobs, history, analytics, and reports
+- **viewer** — read-only access to jobs, history, analytics, reports, metrics, and CVE lookup
 - **operator** — viewer access plus scan and cancellation operations
 - **admin** — operator access plus administrative capability reserved for future expansion
 
@@ -386,6 +430,7 @@ Additional protections include CSRF validation, login/scan rate limiting, respon
 
 - Open ports indicate network reachability, not vulnerability.
 - Risk labels are informational guidance, not a substitute for vulnerability research.
+- CVE enrichment depends on accurate product/version identification and the selected data source; a keyword match is not proof that a specific host is vulnerable.
 - Service fingerprinting is heuristic and reports confidence rather than certainty.
 - TTL/OS identification is heuristic and can be influenced by routing devices.
 - Banner collection is intentionally lightweight.
@@ -428,19 +473,11 @@ aps profiles
 
 When changing API or deployment behavior, add or update regression coverage in `tests/`.
 
-## Roadmap
-
-- [ ] Metrics dashboard visualization and historical time-series storage
-- [ ] Authoritative CVE enrichment with explicit offline/online modes
-- [ ] PyPI / `pipx` release workflow
-- [ ] Expanded multi-user administration
-- [ ] Additional operational observability
-
 ## Release
 
-Current application version: **0.2.1**.
+Current application version: **0.3.0**.
 
-See [`CHANGELOG.md`](CHANGELOG.md) for release history.
+See [`CHANGELOG.md`](CHANGELOG.md) and [`docs/v0.3-release.md`](docs/v0.3-release.md) for release details.
 
 ## License
 
