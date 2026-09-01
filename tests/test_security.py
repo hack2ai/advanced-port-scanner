@@ -36,3 +36,19 @@ def test_csrf_token_requires_authenticated_session_for_json_mutation():
     assert missing.status_code == 403
     valid = client.post("/_test-csrf", json={}, headers={"X-CSRF-Token": "expected-token"})
     assert valid.status_code == 200
+
+
+def test_csrf_rejects_authenticated_session_without_session_token():
+    protected = require_csrf(lambda: jsonify({"ok": True}))
+    protected.__name__ = "protected_without_token"
+
+    test_app = Flask(__name__)
+    test_app.secret_key = "test-secret"
+    test_app.add_url_rule("/_test-csrf-no-token", view_func=protected, methods=["POST"])
+
+    client = test_app.test_client()
+    with client.session_transaction() as sess:
+        sess["username"] = "tester"
+
+    response = client.post("/_test-csrf-no-token", json={})
+    assert response.status_code == 403
