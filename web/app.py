@@ -21,6 +21,7 @@ from scanner.reporting import render_html_report
 from scanner.scanner import scan_target
 from scanner.security import RateLimiter, csrf_token, require_csrf, security_headers
 from scanner.utils import audit, parse_port_range, resolve_target, save_csv, save_json, save_txt, setup_logging
+from scanner.version import VERSION
 from web.api_v1 import api_v1
 
 app = Flask(__name__, template_folder="templates")
@@ -49,7 +50,10 @@ def add_security_headers(response):
 
 
 def _client_key(prefix: str) -> str:
-    address = request.headers.get("X-Forwarded-For", request.remote_addr or "unknown").split(",", 1)[0].strip()
+    if settings.trust_proxy_headers:
+        address = request.headers.get("X-Forwarded-For", request.remote_addr or "unknown").split(",", 1)[0].strip()
+    else:
+        address = request.remote_addr or "unknown"
     return f"{prefix}:{address}"
 
 
@@ -317,7 +321,7 @@ def html_report(job_id: str):
         return jsonify({"error": "History entry not found"}), 404
     payload = {
         "schema_version": item.get("schema_version", "1.0"),
-        "scanner_version": item.get("scanner_version", "3.0.0"),
+        "scanner_version": VERSION,
         "scan_time": item.get("started_at") or item.get("created_at") or _utc_now(),
         "duration": str(item.get("duration", item.get("elapsed_seconds", "N/A"))),
         "scan_type": item.get("scan_type", "N/A"),
