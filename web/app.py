@@ -184,9 +184,11 @@ def start_scan():
             completed_offset = 0
             for target in targets:
                 if job.cancel_event.is_set():
+                    elapsed = round(max(0.0, time.monotonic() - (job.started_monotonic or time.monotonic())), 2)
+                    job.elapsed_seconds = elapsed
                     job.status = "cancelled"
                     job.finished_at = _utc_now()
-                    history.save(job.snapshot(include_results=True))
+                    history.save(job.snapshot(include_results=True) | {"duration": elapsed})
                     return
                 job.current_target = target
                 ip = resolve_target(target, logger)
@@ -202,9 +204,11 @@ def start_scan():
                 try:
                     result = scan_target(ip, start_port, end_port, scan_type, grab_banner, logger, progress_callback=progress, cancel_event=job.cancel_event)
                 except InterruptedError:
+                    elapsed = round(max(0.0, time.monotonic() - (job.started_monotonic or time.monotonic())), 2)
+                    job.elapsed_seconds = elapsed
                     job.status = "cancelled"
                     job.finished_at = _utc_now()
-                    history.save(job.snapshot(include_results=True))
+                    history.save(job.snapshot(include_results=True) | {"duration": elapsed})
                     audit(logger, "scan_cancelled", job_id=job.job_id)
                     return
                 completed_offset += end_port - start_port + 1
@@ -243,6 +247,7 @@ def start_scan():
             elapsed = round(max(0.0, time.monotonic() - (job.started_monotonic or time.monotonic())), 2)
             job.status = "failed"
             job.error = "Scan failed; inspect server logs for details"
+            job.elapsed_seconds = elapsed
             job.finished_at = _utc_now()
             history.save(job.snapshot(include_results=True) | {"duration": elapsed})
             audit(logger, "scan_failed", job_id=job.job_id)
