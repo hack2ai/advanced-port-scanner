@@ -20,7 +20,7 @@ COPY web/ ./web/
 COPY main.py ./main.py
 COPY README.md ./README.md
 
-RUN mkdir -p /app/reports /app/logs \
+RUN mkdir -p /app/data /app/reports /app/logs \
     && useradd --create-home --uid 10001 scanner \
     && chown -R scanner:scanner /app
 USER scanner
