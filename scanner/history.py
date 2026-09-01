@@ -8,8 +8,9 @@ from typing import Any
 
 
 class ScanHistory:
-    def __init__(self, db_path: str | Path) -> None:
+    def __init__(self, db_path: str | Path, retention: int = 100) -> None:
         self.db_path = str(db_path)
+        self.retention = max(1, int(retention))
         Path(self.db_path).parent.mkdir(parents=True, exist_ok=True)
         self._init_db()
 
@@ -45,6 +46,14 @@ class ScanHistory:
                 job.get("total_open", 0),
                 json.dumps(job.get("results", {})),
             ))
+            # Keep history bounded without touching in-flight jobs (only terminal
+            # records are written here).
+            conn.execute(
+                """DELETE FROM scans WHERE job_id IN (
+                    SELECT job_id FROM scans ORDER BY started_at DESC LIMIT -1 OFFSET ?
+                )""",
+                (self.retention,),
+            )
 
     def list(self, limit: int = 50, include_results: bool = False) -> list[dict[str, Any]]:
         limit = max(1, min(int(limit), 200))

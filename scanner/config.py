@@ -39,6 +39,8 @@ class Settings:
     log_level: str
     scan_db: str
     reports_dir: str
+    history_retention: int
+    report_retention: int
     auth_enabled: bool
     auth_username: str
     auth_password_hash: str
@@ -64,6 +66,8 @@ def load_settings() -> Settings:
         log_level=os.getenv("LOG_LEVEL", "INFO").upper(),
         scan_db=os.getenv("SCAN_DB", "data/scans.db"),
         reports_dir=os.getenv("REPORTS_DIR", "reports"),
+        history_retention=_int("HISTORY_RETENTION", 100, 1, 10000),
+        report_retention=_int("REPORT_RETENTION", 100, 1, 1000),
         auth_enabled=_bool("AUTH_ENABLED", False),
         auth_username=os.getenv("AUTH_USERNAME", ""),
         auth_password_hash=os.getenv("AUTH_PASSWORD_HASH", ""),

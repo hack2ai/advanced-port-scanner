@@ -18,6 +18,7 @@ from scanner.history import ScanHistory
 from scanner.jobs import JobManager, ScanJob
 from scanner.profiles import get_profile, list_profiles
 from scanner.reporting import render_html_report
+from scanner.retention import prune_reports
 from scanner.scanner import scan_target
 from scanner.security import RateLimiter, csrf_token, require_csrf, security_headers
 from scanner.utils import audit, parse_port_range, resolve_target, save_csv, save_json, save_txt, setup_logging
@@ -32,7 +33,7 @@ app.config["SESSION_COOKIE_HTTPONLY"] = True
 app.config["SESSION_COOKIE_SAMESITE"] = "Lax"
 app.config["SESSION_COOKIE_SECURE"] = settings.secure_cookies
 logger = setup_logging(str(ROOT / "logs"))
-history = ScanHistory(settings.scan_db)
+history = ScanHistory(settings.scan_db, retention=settings.history_retention)
 app.config["APS_HISTORY"] = history
 job_manager = JobManager(max_workers=settings.max_concurrent_jobs, max_queue=16, retention=100)
 auth_limiter = RateLimiter(settings.auth_rate_limit, settings.auth_rate_window)
@@ -193,6 +194,7 @@ def start_scan():
                     job.status = "cancelled"
                     job.finished_at = _utc_now()
                     history.save(job.snapshot(include_results=True) | {"duration": elapsed})
+                    prune_reports(ROOT / settings.reports_dir, settings.report_retention)
                     return
                 job.current_target = target
                 ip = resolve_target(target, logger)
@@ -214,6 +216,7 @@ def start_scan():
                     job.finished_at = _utc_now()
                     history.save(job.snapshot(include_results=True) | {"duration": elapsed})
                     audit(logger, "scan_cancelled", job_id=job.job_id)
+                    prune_reports(ROOT / settings.reports_dir, settings.report_retention)
                     return
                 completed_offset += end_port - start_port + 1
                 job_manager.update_progress(
@@ -228,6 +231,7 @@ def start_scan():
             elapsed = round(max(0.0, time.monotonic() - (job.started_monotonic or time.monotonic())), 2)
             payload = {
                 "schema_version": "1.0",
+                "scanner_version": VERSION,
                 "scan_time": job.started_at or job.created_at,
                 "duration": f"{elapsed}s",
                 "scan_type": job.scan_type,
@@ -247,6 +251,7 @@ def start_scan():
             save_txt(payload, str(report_dir / f"scan_{timestamp}_{job.job_id}.txt"))
             html_path = report_dir / f"scan_{timestamp}_{job.job_id}.html"
             html_path.write_text(render_html_report(payload), encoding="utf-8")
+            prune_reports(report_dir, settings.report_retention)
         except Exception:
             elapsed = round(max(0.0, time.monotonic() - (job.started_monotonic or time.monotonic())), 2)
             job.status = "failed"
@@ -254,6 +259,7 @@ def start_scan():
             job.elapsed_seconds = elapsed
             job.finished_at = _utc_now()
             history.save(job.snapshot(include_results=True) | {"duration": elapsed})
+            prune_reports(ROOT / settings.reports_dir, settings.report_retention)
             audit(logger, "scan_failed", job_id=job.job_id)
             raise
 
@@ -287,6 +293,7 @@ def cancel(job_id: str):
     job = job_manager.get(job_id)
     if job is not None and job.status == "cancelled":
         history.save(job.snapshot(include_results=True) | {"duration": job.elapsed_seconds})
+        prune_reports(ROOT / settings.reports_dir, settings.report_retention)
     return jsonify(job.snapshot(include_results=True))
 
 
