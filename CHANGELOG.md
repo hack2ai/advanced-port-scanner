@@ -2,6 +2,12 @@
 
 All notable changes to this project are documented here.
 
+## [0.3.1] - 2026-09-01
+
+### Fixed
+- Republished the Python package with the current professional README so the PyPI project page matches the GitHub project presentation.
+- Kept package metadata and documentation synchronized at 0.3.1.
+
 ## [0.3.0] - 2026-09-01
 
 ### Added
