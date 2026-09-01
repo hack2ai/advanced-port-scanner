@@ -12,6 +12,7 @@ from rich.console import Console
 from rich.panel import Panel
 from rich.table import Table
 
+from scanner.config import settings
 from scanner.profiles import get_profile, list_profiles
 from scanner.scanner import scan_target
 from scanner.utils import parse_port_range, resolve_target, save_csv, save_json, save_txt, setup_logging
@@ -67,6 +68,15 @@ def run_scan(args: argparse.Namespace) -> int:
     if not ports:
         console.print(f"[bold red]Invalid port range:[/bold red] {ports_text}")
         return 2
+    start_port, end_port = ports
+    requested_ports = end_port - start_port + 1
+    if requested_ports > settings.max_ports:
+        console.print(
+            f"[bold red]Port range exceeds configured limit:[/bold red] "
+            f"{requested_ports} ports requested, MAX_PORTS={settings.max_ports}. "
+            "Raise MAX_PORTS explicitly to enable a larger authorized scan."
+        )
+        return 2
 
     logger = setup_logging()
     raw_targets = list(dict.fromkeys(t.strip() for t in args.targets.split(",") if t.strip()))
@@ -81,7 +91,6 @@ def run_scan(args: argparse.Namespace) -> int:
         console.print("[bold red]No resolvable targets.[/bold red]")
         return 2
 
-    start_port, end_port = ports
     profile_label = args.profile if args.ports is None else "custom"
     console.print(Panel.fit(
         f"[bold cyan]ADVANCED PORT SCANNER[/bold cyan]  v{VERSION}\n"
