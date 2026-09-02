@@ -74,18 +74,33 @@ jobs:
                   names = set(zf.namelist())
                   missing = [item for item in required_files if item not in names]
                   if missing:
-                      raise SystemExit(f"Wheel is missing required dashboard files: {missing}")
-                  metadata_name = next(name for name in zf.namelist() if name.endswith(".dist-info/METADATA"))
-                  metadata = Parser().parsestr(zf.read(metadata_name).decode("utf-8"))
+                      raise SystemExit(
+                          f"Wheel is missing required dashboard files: {missing}"
+                      )
+                  metadata_name = next(
+                      name for name in zf.namelist()
+                      if name.endswith(".dist-info/METADATA")
+                  )
+                  metadata = Parser().parsestr(
+                      zf.read(metadata_name).decode("utf-8")
+                  )
                   versions.add(metadata["Version"])
 
           for sdist in Path("dist").glob("*.tar.gz"):
               with tarfile.open(sdist, "r:gz") as tf:
                   names = {member.name for member in tf.getmembers()}
-                  missing = [item for item in required_files if not any(name.endswith(item) for name in names)]
+                  missing = [
+                      item for item in required_files
+                      if not any(name.endswith(item) for name in names)
+                  ]
                   if missing:
-                      raise SystemExit(f"Source distribution is missing required dashboard files: {missing}")
-                  metadata_member = next(member for member in tf.getmembers() if member.name.endswith("/PKG-INFO"))
+                      raise SystemExit(
+                          f"Source distribution is missing required dashboard files: {missing}"
+                      )
+                  metadata_member = next(
+                      member for member in tf.getmembers()
+                      if member.name.endswith("/PKG-INFO")
+                  )
                   stream = tf.extractfile(metadata_member)
                   if stream is None:
                       raise SystemExit("Could not read PKG-INFO from sdist")
@@ -93,7 +108,9 @@ jobs:
                   versions.add(metadata["Version"])
 
           if len(versions) != 1:
-              raise SystemExit(f"Expected exactly one distribution version, found: {sorted(versions)}")
+              raise SystemExit(
+                  f"Expected exactly one distribution version, found: {sorted(versions)}"
+              )
           print(next(iter(versions)))
           PY
           )
@@ -136,10 +153,3 @@ jobs:
 
       - name: Publish distributions
         uses: pypa/gh-action-pypi-publish@release/v1
-        with:
-          packages-dir: dist
-          verify-metadata: true
-          skip-existing: false
-          verbose: true
-          print-hash: true
-          attestations: true
